@@ -1,15 +1,15 @@
 import json
 import os
-from flask import Flask, request, render_template, Response, jsonify
+
+from flask import Flask, Response, jsonify, render_template, request, send_file
+
 import db
 from agent import run_agent_stream
+from config_providers import DEFAULT_PROVIDER, RAG_PROVIDER, get_provider, get_provider_list
 from paths import ICON_PATH, is_path_permitted
-from config_providers import get_provider, get_provider_list, DEFAULT_PROVIDER, RAG_PROVIDER
 
 app = Flask(__name__)
 db.init_db()
-
-from flask import send_file
 
 
 def _pack_user_content(task: str, images=None) -> str:
@@ -87,6 +87,7 @@ def project_tree():
       - depth: 最大深度（默认 3）
     """
     import os
+
     import runtime
 
     path = request.args.get("path") or runtime.get_project_root()
@@ -167,7 +168,7 @@ def file_content():
         return jsonify({"error": f"文件太大（{size} 字节），无法预览"}), 400
 
     try:
-        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        with open(path, encoding="utf-8", errors="ignore") as f:
             content = f.read()
         return jsonify({"ok": True, "content": content, "size": size})
     except Exception as e:
@@ -384,8 +385,8 @@ def cancel_run():
 @app.route("/export/<int:session_id>", methods=["GET"])
 def export_session(session_id):
     """导出会话（支持 md / json / pdf）"""
-    from urllib.parse import quote
     from datetime import datetime
+    from urllib.parse import quote
 
     fmt = request.args.get("format", "md").lower()
 
@@ -481,13 +482,14 @@ def export_session(session_id):
 
     if fmt == "pdf":
         try:
+            import io
+            import re
+
             from reportlab.lib.pagesizes import A4
-            from reportlab.pdfgen import canvas
             from reportlab.lib.units import cm
             from reportlab.pdfbase import pdfmetrics
             from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-            import io
-            import re
+            from reportlab.pdfgen import canvas
 
             pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
 

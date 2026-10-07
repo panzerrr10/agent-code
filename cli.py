@@ -8,9 +8,10 @@
     agent-code --help                         # 帮助
 """
 
+import argparse
 import os
 import sys
-import argparse
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -23,7 +24,7 @@ def load_config():
     config.py 里的 BASE_URL / MODEL 常量已删除。
     命令行 --api-key / --base-url / --model 仍可覆盖（开发者便利）。
     """
-    from config_providers import get_provider, DEFAULT_PROVIDER
+    from config_providers import DEFAULT_PROVIDER, get_provider
 
     cfg = get_provider(DEFAULT_PROVIDER)
     return {
@@ -89,8 +90,9 @@ def run_task(task: str, project: str, config: dict, verbose: bool = True, confir
 
     confirm_event = None  # 记录遇到的 confirm 事件
 
-    import db
     import json
+
+    import db
 
     # 保存用户消息（_resume 时不存，因为上一轮已存过）
     if session_id and not _resume:
@@ -204,7 +206,7 @@ def interactive_mode(project: str, config: dict, verbose: bool, session_id: int 
         session_id = db.create_session("CLI 会话")
         title = "CLI 会话"
 
-    print(f"\033[32magent-code 交互模式\033[0m")
+    print("\033[32magent-code 交互模式\033[0m")
     print(f"项目: {os.path.abspath(project)}")
     print(f"会话: #{session_id} ({title})")
     print("命令: /history 历史 /new 新会话 /status Git状态 /log 最近提交 /undo [N] 回滚N步 /exit 退出\n")
@@ -239,14 +241,14 @@ def interactive_mode(project: str, config: dict, verbose: bool, session_id: int 
 
         if task == "/status":
             from tools import git_status
-            print(f"\n\033[33m[Git Status]\033[0m")
+            print("\n\033[33m[Git Status]\033[0m")
             print(git_status())
             print()
             continue
 
         if task == "/log":
             from tools import git_log
-            print(f"\n\033[33m[Git Log]\033[0m")
+            print("\n\033[33m[Git Log]\033[0m")
             print(git_log(5))
             print()
             continue
@@ -264,12 +266,12 @@ def interactive_mode(project: str, config: dict, verbose: bool, session_id: int 
                     continue
 
             # 显示当前状态
-            print(f"\n\033[33m[当前 Git 状态]\033[0m")
+            print("\n\033[33m[当前 Git 状态]\033[0m")
             print(git_status())
 
             # 二次确认
             print(f"\n\033[31m⚠️ 即将回滚 {n} 个 commit（git reset --hard HEAD~{n}）\033[0m")
-            print(f"\033[31m⚠️ 当前所有未提交改动会丢失！\033[0m")
+            print("\033[31m⚠️ 当前所有未提交改动会丢失！\033[0m")
             try:
                 answer = input("\033[36m确认回滚？[y/N] \033[0m").strip().lower()
             except (EOFError, KeyboardInterrupt):
@@ -277,7 +279,7 @@ def interactive_mode(project: str, config: dict, verbose: bool, session_id: int 
 
             if answer in ("y", "yes"):
                 result = git_rollback(f"HEAD~{n}")
-                print(f"\n\033[32m[已回滚]\033[0m")
+                print("\n\033[32m[已回滚]\033[0m")
                 print(result)
             else:
                 print("\033[90m[已取消]\033[0m")

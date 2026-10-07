@@ -9,7 +9,6 @@ from dotenv import load_dotenv
 # ✅ 加载 .env 文件
 load_dotenv()
 
-from paths import BASE_DIR, is_allowed_path
 
 # ============ Agent 配置 ============
 # （批次 6 起：DASHSCOPE_API_KEY / BASE_URL / MODEL / PLANNER_MODEL /

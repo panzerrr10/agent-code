@@ -18,8 +18,8 @@ import types
 
 import pytest
 
-import runtime
 import reviewer
+import runtime
 import tools
 from config_providers import PROVIDERS, get_extra_body, get_provider_id_by_base_url
 from paths import is_allowed_path, is_path_permitted

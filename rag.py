@@ -1,6 +1,6 @@
-import os
 import chromadb
 from dotenv import load_dotenv
+
 from paths import CHROMA_DIR
 
 load_dotenv()
@@ -11,9 +11,9 @@ def get_client(api_key: str = None, base_url: str = None):
 
     优先级：显式传入参数 > runtime 会话配置 > config_providers 的 RAG 配置（锁死阿里云百炼）。
     """
-    from utils import get_llm_client
     import runtime
     from config_providers import get_rag_config
+    from utils import get_llm_client
 
     key = api_key or runtime.get_effective_rag_api_key()
     url = base_url or runtime.get_effective_rag_base_url()
@@ -66,6 +66,7 @@ def embed_texts(texts: list, batch_size: int = 10, api_key: str = None, base_url
 def extract_text_from_pdf(file_bytes: bytes) -> str:
     """从 PDF 提取纯文本。"""
     import io
+
     from pypdf import PdfReader
 
     reader = PdfReader(io.BytesIO(file_bytes))
@@ -83,6 +84,7 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
 def extract_text_from_docx(file_bytes: bytes) -> str:
     """从 .docx 提取纯文本（含表格）。"""
     import io
+
     from docx import Document
 
     doc = Document(io.BytesIO(file_bytes))
@@ -120,7 +122,7 @@ def extract_text(filename: str, file_bytes: bytes) -> str:
             try:
                 return file_bytes.decode("gbk", errors="ignore")
             except Exception:
-                raise ValueError("文本文件编码无法识别，请用 UTF-8 保存")
+                raise ValueError("文本文件编码无法识别，请用 UTF-8 保存") from None
 
     if name.endswith(".pdf"):
         text = extract_text_from_pdf(file_bytes)

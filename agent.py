@@ -1,14 +1,15 @@
 import json
 import os
-from utils import call_llm_with_retry, get_llm_client
+
 from config import MAX_STEPS
 from config_providers import (
-    get_provider,
-    get_extra_body,
-    get_provider_id_by_base_url,
     DEFAULT_PROVIDER,
+    get_extra_body,
+    get_provider,
+    get_provider_id_by_base_url,
 )
-from tools import TOOLS_SCHEMA, execute_tool, get_tools_schema
+from tools import execute_tool, get_tools_schema
+from utils import call_llm_with_retry, get_llm_client
 
 
 def _get_default_client():
@@ -477,11 +478,18 @@ def run_agent_stream(
             # "An assistant message with 'tool_calls' must be followed by tool messages..."
             # 注意：仅裁剪「当前这条」assistant 消息的未处理 tool_calls，
             # 之前步骤的 assistant 消息（及其 tool_calls）原样保留，避免误删导致旧 tool 消息悬空。
-            def _save_pending_with_processed(_idx, _tc, _func_name, _func_args):
+            # 先把当前 assistant 的 tool_call id 列表取出来，供下面的闭包按值捕获：
+            # 闭包若直接引用 assistant_msg / step，会绑定到外层循环变量，
+            # 一旦将来改成延迟调用就会取到错误的一轮数据。
+            _all_tc_ids = [t.id for t in assistant_msg.tool_calls]
+
+            def _save_pending_with_processed(
+                _idx, _tc, _func_name, _func_args, _tc_ids=_all_tc_ids, _step=step
+            ):
                 import runtime as _rt_save
 
-                _current_ids = {t.id for t in assistant_msg.tool_calls}
-                _processed_ids = {t.id for t in assistant_msg.tool_calls[: _idx + 1]}
+                _current_ids = set(_tc_ids)
+                _processed_ids = set(_tc_ids[: _idx + 1])
                 _modified_messages = []
                 for _m in messages:
                     if _m.get("role") == "assistant" and _m.get("tool_calls"):
@@ -503,7 +511,7 @@ def run_agent_stream(
                 _rt_save.set_pending_state(
                     {
                         "messages": _modified_messages,
-                        "step": step,
+                        "step": _step,
                         "task": user_task,
                         "pending_tool": {
                             "id": _tc.id,
@@ -598,7 +606,7 @@ def run_agent_stream(
                             old_content = ""
                             if os.path.exists(path):
                                 with open(
-                                    path, "r", encoding="utf-8", errors="ignore"
+                                    path, encoding="utf-8", errors="ignore"
                                 ) as f:
                                     old_content = f.read()
                         except Exception:

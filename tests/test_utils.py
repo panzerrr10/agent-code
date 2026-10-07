@@ -1,4 +1,3 @@
-import pytest
 from utils import call_llm_with_retry
 
 

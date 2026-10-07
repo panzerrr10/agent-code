@@ -1,5 +1,5 @@
+from config_providers import DEFAULT_PROVIDER, get_provider
 from utils import call_llm_with_retry, get_llm_client
-from config_providers import get_provider, DEFAULT_PROVIDER
 
 
 def _get_default_client():

@@ -3,10 +3,12 @@ AI Agent 桌面应用启动器
 用 pywebview 把 Flask 应用包装成桌面窗口
 """
 
+import subprocess
 import threading
 import time
-import subprocess
+
 import webview
+
 from app import app
 from paths import WEBVIEW_DATA_DIR
 
@@ -73,7 +75,7 @@ def main():
     time.sleep(1.5)
 
     # 4. 创建 pywebview 窗口
-    window = webview.create_window(
+    webview.create_window(
         title="AI Agent",
         url="http://127.0.0.1:5004",
         width=1200,

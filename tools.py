@@ -1,9 +1,10 @@
 import os
-import subprocess
-import rag
 import shlex
-from paths import is_allowed_path, TRASH_DIR
+import subprocess
+
+import rag
 from config import MAX_FILE_SIZE, MAX_LIST_ITEMS
+from paths import TRASH_DIR, is_allowed_path
 
 # ============ 工具实现 ============
 
@@ -66,7 +67,7 @@ def read_file(path: str, max_lines: int = 500) -> str:
         if size > MAX_FILE_SIZE:
             return f"❌ 文件太大（{size} bytes），超过限制 {MAX_FILE_SIZE}"
 
-        with open(abs_path, "r", encoding="utf-8", errors="ignore") as f:
+        with open(abs_path, encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()
 
         total = len(lines)
@@ -94,7 +95,7 @@ def read_file_range(path: str, start: int = 1, end: int = 100) -> str:
         if not os.path.isfile(abs_path):
             return f"❌ 不是文件：{path}"
 
-        with open(abs_path, "r", encoding="utf-8", errors="ignore") as f:
+        with open(abs_path, encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()
 
         total = len(lines)
@@ -104,7 +105,7 @@ def read_file_range(path: str, start: int = 1, end: int = 100) -> str:
         end = min(total, end)
 
         if start > end:
-            return f"❌ 起始行 > 结束行"
+            return "❌ 起始行 > 结束行"
 
         selected = lines[start - 1 : end]
         content = "".join(selected)
@@ -163,7 +164,7 @@ def search_files(keyword: str, path: str = ".", max_results: int = 50) -> str:
                 ):
                     continue
                 try:
-                    with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+                    with open(fpath, encoding="utf-8", errors="ignore") as f:
                         for i, line in enumerate(f, 1):
                             if keyword in line:
                                 rel = os.path.relpath(fpath, abs_path)
@@ -300,8 +301,8 @@ def write_file(path: str, content: str) -> str:
         # 先备份原文件到 .trash
         os.makedirs(TRASH_DIR, exist_ok=True)
 
-        import time
         import shutil
+        import time
 
         filename = os.path.basename(abs_path)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -338,11 +339,11 @@ def edit_file(path: str, old_text: str, new_text: str) -> str:
         if not os.path.isfile(abs_path):
             return f"❌ 不是文件：{path}"
 
-        with open(abs_path, "r", encoding="utf-8") as f:
+        with open(abs_path, encoding="utf-8") as f:
             content = f.read()
 
         if old_text not in content:
-            return f"❌ 未找到要替换的内容（old_text 不匹配）"
+            return "❌ 未找到要替换的内容（old_text 不匹配）"
 
         count = content.count(old_text)
         if count > 1:
@@ -351,8 +352,8 @@ def edit_file(path: str, old_text: str, new_text: str) -> str:
         new_content = content.replace(old_text, new_text, 1)
 
         # 备份
-        import time
         import shutil
+        import time
 
         os.makedirs(TRASH_DIR, exist_ok=True)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -774,8 +775,9 @@ def delete_memory(memory_id: int) -> str:
 
 def project_info() -> str:
     """返回当前项目信息：类型、结构、关键文件。"""
-    import runtime
     import os
+
+    import runtime
     root = runtime.get_project_root()
     if not os.path.isdir(root):
         return f"❌ 项目目录不存在：{root}"
@@ -826,7 +828,7 @@ def list_symbols(path: str) -> str:
     if not is_allowed_path(path):
         return f"❌ 拒绝访问：{path}"
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             tree = ast.parse(f.read())
     except SyntaxError as e:
         return f"❌ 语法错误：{e}"
@@ -849,7 +851,8 @@ def list_symbols(path: str) -> str:
 
 def find_references(symbol: str, path: str = ".") -> str:
     """在项目里找某个符号的引用。"""
-    import os, re
+    import os
+    import re
     path = _normalize_path(path)
     if not is_allowed_path(path):
         return f"❌ 拒绝访问：{path}"
@@ -862,7 +865,7 @@ def find_references(symbol: str, path: str = ".") -> str:
                 continue
             fpath = os.path.join(root, fname)
             try:
-                with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+                with open(fpath, encoding="utf-8", errors="ignore") as f:
                     for i, line in enumerate(f, 1):
                         if pattern.search(line):
                             rel = os.path.relpath(fpath, path)
@@ -881,7 +884,7 @@ def get_function_body(path: str, func_name: str) -> str:
     if not is_allowed_path(path):
         return f"❌ 拒绝访问：{path}"
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             source = f.read()
         tree = ast.parse(source)
     except Exception as e:
@@ -903,8 +906,8 @@ def multi_edit(edits: list) -> str:
 
     edits: [{"path": "...", "old_text": "...", "new_text": "..."}, ...]
     """
-    import time
     import shutil
+    import time
 
     if not isinstance(edits, list) or not edits:
         return "❌ edits 必须是非空列表"
@@ -930,7 +933,7 @@ def multi_edit(edits: list) -> str:
 
         if abs_path not in pending:
             try:
-                with open(abs_path, "r", encoding="utf-8") as f:
+                with open(abs_path, encoding="utf-8") as f:
                     pending[abs_path] = f.read()
             except Exception as e:
                 return f"❌ multi_edit 已放弃（读取失败 {path}）：{e}"
@@ -981,9 +984,10 @@ def _run_git_local(args: list) -> str:
     否则 LLM 生成的 commit message / commit ref 可拼接 shell 元字符，
     直接在宿主机上执行任意命令。
     """
-    import subprocess
-    import runtime
     import os
+    import subprocess
+
+    import runtime
     root = runtime.get_project_root()
     if not os.path.isdir(root):
         return f"❌ 项目目录不存在：{root}"
@@ -1036,8 +1040,9 @@ def run_tests(path: str = "") -> str:
     全部以参数列表执行（shell=False），工作目录固定为项目根，
     避免 LLM 传入的路径被拼接进 shell 命令。
     """
-    import runtime
     import os
+
+    import runtime
     root = runtime.get_project_root()
     if not os.path.isdir(root):
         return f"❌ 项目目录不存在：{root}"
@@ -1072,9 +1077,14 @@ def run_tests(path: str = "") -> str:
         if target:
             pytest_cmd.append(target)
         out = _run_subprocess(pytest_cmd, root, 120)
-        # pytest 失败 / 不可用时回退 unittest discover（与原 `||` 语义一致）
+        # pytest 失败 / 不可用时回退 unittest（与原 `||` 语义一致）
         if "【退出码】0" not in out:
-            uni_cmd = [venv_python, "-m", "unittest", "discover", "-v", "-s", root]
+            if target and target.endswith(".py"):
+                # 指定了具体测试文件：直接按模块名运行，而不是全量 discover
+                module = os.path.splitext(os.path.basename(target))[0]
+                uni_cmd = [venv_python, "-m", "unittest", "-v", module]
+            else:
+                uni_cmd = [venv_python, "-m", "unittest", "discover", "-v", "-s", root]
             out += "\n\n【回退 unittest】\n" + _run_subprocess(uni_cmd, root, 120)
 
     if len(out) > 8000:
@@ -1574,7 +1584,7 @@ CORE_TOOLS = [
     "search_files",
     "create_file",
     "write_file",
-    "edit_file", 
+    "edit_file",
     "project_info",
     "list_symbols",
     "find_references",

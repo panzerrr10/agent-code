@@ -1,9 +1,8 @@
-import pytest
 from tools import (
     create_plan,
-    update_plan,
     get_plan,
     is_safe_command,
+    update_plan,
 )
 
 

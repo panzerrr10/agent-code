@@ -1,5 +1,4 @@
-import pytest
-from demos.utils2 import add, subtract, multiply
+from demos.utils2 import add, multiply, subtract
 
 
 class TestAdd:
