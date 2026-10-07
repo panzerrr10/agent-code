@@ -864,6 +864,27 @@
             cursor: not-allowed;
         }
 
+        #stopBtn {
+            padding: 11px 16px;
+            background: #ef4444;
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-bottom: 2px;
+        }
+
+        #stopBtn:hover {
+            background: #dc2626;
+        }
+
+        #stopBtn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
         /* 任务计划面板 */
         .plan-panel {
             background: #fff8e1;
@@ -1492,7 +1513,7 @@
                             <span class="role-label">📋 规划</span>
                             <button type="button" class="role-picker-btn" id="plannerPickerBtn" onclick="toggleRolePicker('planner', event)">
                                 <span id="plannerPickerIcon">🐳</span>
-                                <span id="plannerPickerLabel">DeepSeek · deepseek-flash</span>
+                                <span id="plannerPickerLabel">DeepSeek · deepseek-chat</span>
                                 <span class="arrow">▾</span>
                             </button>
                             <div class="role-picker-dropdown" id="plannerPickerDropdown"></div>
@@ -1501,7 +1522,7 @@
                             <span class="role-label">⚙️ 执行</span>
                             <button type="button" class="role-picker-btn" id="executorPickerBtn" onclick="toggleRolePicker('executor', event)">
                                 <span id="executorPickerIcon">🐳</span>
-                                <span id="executorPickerLabel">DeepSeek · deepseek-flash</span>
+                                <span id="executorPickerLabel">DeepSeek · deepseek-chat</span>
                                 <span class="arrow">▾</span>
                             </button>
                             <div class="role-picker-dropdown" id="executorPickerDropdown"></div>
@@ -1510,7 +1531,7 @@
                             <span class="role-label">🔍 审查</span>
                             <button type="button" class="role-picker-btn" id="reviewerPickerBtn" onclick="toggleRolePicker('reviewer', event)">
                                 <span id="reviewerPickerIcon">🐳</span>
-                                <span id="reviewerPickerLabel">DeepSeek · deepseek-flash</span>
+                                <span id="reviewerPickerLabel">DeepSeek · deepseek-chat</span>
                                 <span class="arrow">▾</span>
                             </button>
                             <div class="role-picker-dropdown" id="reviewerPickerDropdown"></div>
@@ -1526,6 +1547,9 @@
                     </div>
                     <textarea id="task" placeholder="..."></textarea>
                     <button id="runBtn" onclick="runTask()">执行</button>
+                    <button id="stopBtn" onclick="cancelRun()"
+                        title="停止当前任务（协作式取消，会在下一个检查点停下）"
+                        style="display: none;">⏹ 停止</button>
                 </div>
             </div>
         </div>
@@ -1659,15 +1683,12 @@
         async function resumeRun(ctx) {
             const sessionId = (ctx.sessionId != null) ? ctx.sessionId : currentSessionId;
             const isActive = () => (currentSessionId === sessionId);
-            const btn = document.getElementById("runBtn");
-            if (isActive()) {
-                btn.disabled = true;
-                btn.textContent = "继续中...";
-            }
 
             if (!sessionStates[sessionId]) sessionStates[sessionId] = {};
             const st = sessionStates[sessionId];
             st.status = "running";
+            // 续跑同样是一次运行：显示「停止」按钮（必须在 status 置位之后调用）
+            updateRunControls();
 
             let fullText = st.fullText || "";
             let lastResultEl = null;
@@ -1760,6 +1781,16 @@
                                 showCommandConfirm(ctx, ev.cmd);
                             } else if (ev.type === "plan_update") {
                                 renderPlan(ev.plan);
+                            } else if (ev.type === "cancelled") {
+                                // 停止：保留已产出的文本，并明确标注是用户主动中断
+                                ctx.bubble.innerHTML = DOMPurify.sanitize(marked.parse(fullText));
+                                const stopTip = document.createElement("div");
+                                stopTip.className = "bubble";
+                                stopTip.style.cssText = "background:#fef3c7;color:#92400e;margin-top:6px;";
+                                stopTip.textContent = fullText
+                                    ? "⏹ 已停止本次任务，上方为中断前已产出的内容"
+                                    : "⏹ 已停止本次任务";
+                                ctx.bubble.parentElement.appendChild(stopTip);
                             } else if (ev.type === "error") {
                                 ctx.bubble.style.color = "#b91c1c";
                                 ctx.bubble.textContent = "⚠️ " + ev.content;
@@ -1783,9 +1814,8 @@
                 st.status = "done";
                 if (st.hintEl) { st.hintEl.remove(); st.hintEl = null; }
                 loadSessions();
+                updateRunControls();   // 续跑结束：恢复「执行」、隐藏「停止」
                 if (isActive()) {
-                    btn.disabled = false;
-                    btn.textContent = "执行";
                     const input = document.getElementById("task");
                     if (input) input.focus();
                 }
@@ -2224,12 +2254,8 @@
             }
 
             // 按钮状态跟随"被切换到的会话"：A 在跑时切到 B，B 仍可发起新任务（多会话并行）
-            const runBtn = document.getElementById("runBtn");
-            if (runBtn) {
-                const sidRunning = !!(sessionStates[sessionId] && sessionStates[sessionId].status === "running");
-                runBtn.disabled = sidRunning;
-                runBtn.textContent = sidRunning ? "运行中..." : "执行";
-            }
+            // 「停止」按钮也在此同步：只有切到正在运行的会话才显示
+            updateRunControls();
 
             chat.scrollTop = chat.scrollHeight;
         }
@@ -2692,9 +2718,51 @@
         });
 
         // ============ 执行任务 ============
+        // ===== 任务中断 =====
+        // 依据「当前会话是否在运行」统一切换 执行/停止 按钮，
+        // 避免在多处各改一遍导致按钮状态不同步
+        function updateRunControls() {
+            const runBtn = document.getElementById("runBtn");
+            const stopBtn = document.getElementById("stopBtn");
+            if (!runBtn || !stopBtn) return;
+            const running = !!(currentSessionId
+                && sessionStates[currentSessionId]
+                && sessionStates[currentSessionId].status === "running");
+            stopBtn.style.display = running ? "inline-block" : "none";
+            stopBtn.disabled = false;
+            stopBtn.textContent = "⏹ 停止";
+            runBtn.disabled = running;
+            runBtn.textContent = running ? "运行中..." : "执行";
+        }
+
+        async function cancelRun() {
+            const sid = currentSessionId;
+            if (!sid) return;
+            const stopBtn = document.getElementById("stopBtn");
+            if (stopBtn) {
+                stopBtn.disabled = true;
+                stopBtn.textContent = "停止中...";
+            }
+            try {
+                const res = await fetch("/run/cancel", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ session_id: sid }),
+                });
+                const j = await res.json().catch(() => ({}));
+                if (!j.cancelled) {
+                    // 没命中：任务可能刚好跑完（或本会话并未在运行）
+                    console.log("[CANCEL] 当前没有正在运行的任务");
+                    updateRunControls();
+                }
+            } catch (e) {
+                console.warn("[CANCEL] 停止请求失败", e);
+                updateRunControls();
+            }
+        }
+
         async function runTask() {
             const input = document.getElementById("task");
-            const btn = document.getElementById("runBtn");
             const task = input.value.trim();
             const images = pendingImages.map(img => img.dataUrl);   // 待发送图片（data URL）
             if (!task && !images.length) return;
@@ -2709,8 +2777,7 @@
             addUserMessage(task, null, images);
             clearImages();
             input.value = "";
-            btn.disabled = true;
-            btn.textContent = "运行中...";
+            updateRunControls();
 
             const ctx = addAssistantMessage();
             sessionStates[mySessionId].ctx = ctx;   // 供切回本会话时重新挂载实时输出
@@ -2841,6 +2908,16 @@
                                 lastResultEl = appendToolCall(ctx, ev.name, ev.args);
                             } else if (ev.type === "tool_result") {
                                 if (lastResultEl) updateToolResult(lastResultEl, ev.content);
+                            } else if (ev.type === "cancelled") {
+                                // 停止：保留已产出的文本，并明确标注是用户主动中断
+                                ctx.bubble.innerHTML = DOMPurify.sanitize(marked.parse(fullText));
+                                const stopTip = document.createElement("div");
+                                stopTip.className = "bubble";
+                                stopTip.style.cssText = "background:#fef3c7;color:#92400e;margin-top:6px;";
+                                stopTip.textContent = fullText
+                                    ? "⏹ 已停止本次任务，上方为中断前已产出的内容"
+                                    : "⏹ 已停止本次任务";
+                                ctx.bubble.parentElement.appendChild(stopTip);
                             } else if (ev.type === "error") {
                                 ctx.bubble.style.color = "#b91c1c";
                                 ctx.bubble.textContent = "⚠️ " + ev.content;
@@ -2871,9 +2948,8 @@
                     sessionStates[mySessionId].hintEl = null;
                 }
                 loadSessions();   // 刷新会话列表，去掉 ⏳（不论当前在哪个会话）
+                updateRunControls();   // 任务结束：恢复「执行」、隐藏「停止」
                 if (currentSessionId === mySessionId) {
-                    btn.disabled = false;
-                    btn.textContent = "执行";
                     input.focus();
                 }
             }

@@ -127,6 +127,8 @@ def run_agent_stream(
     # 绑定当前会话：项目根目录 / 计划 / pending 等粘性状态均按会话分桶，
     # 避免并发会话互相覆盖（多标签页同时跑任务时尤其重要）。
     _rt_session.set_session_id(session_id)
+    # 注册本次运行的取消标志（全新 Event，上一次运行的残留取消状态不会误伤本次）
+    _rt_session.register_run(session_id)
 
     import db
 
@@ -306,6 +308,11 @@ def run_agent_stream(
 
     _start_step = _pending.get("step", 0) if _resume and _pending else 0
     for step in range(_start_step, max_steps):
+        # 取消检查点 1：进入新的一步之前
+        if runtime.is_cancelled():
+            yield {"type": "cancelled", "content": "任务已停止"}
+            yield {"type": "done"}
+            return
         try:
             # 根据任务动态选工具
             selected_tools = get_tools_schema(
@@ -335,6 +342,15 @@ def run_agent_stream(
             usage = None
 
             for chunk in stream:
+                # 取消检查点 2：流式输出过程中（长回答可能持续几十秒）
+                if runtime.is_cancelled():
+                    try:
+                        stream.close()
+                    except Exception:
+                        pass
+                    yield {"type": "cancelled", "content": "任务已停止"}
+                    yield {"type": "done"}
+                    return
                 # 处理 usage（最后一个 chunk 带）
                 if hasattr(chunk, "usage") and chunk.usage:
                     usage = chunk.usage
@@ -498,6 +514,11 @@ def run_agent_stream(
                 )
 
             for idx, tc in enumerate(assistant_msg.tool_calls):
+                # 取消检查点 3：执行任何工具之前（避免「已点停止却还在写文件」）
+                if runtime.is_cancelled():
+                    yield {"type": "cancelled", "content": "任务已停止"}
+                    yield {"type": "done"}
+                    return
                 func_name = tc.function.name
                 try:
                     args = json.loads(tc.function.arguments or "{}")

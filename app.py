@@ -356,8 +356,29 @@ def run():
                 db.save_message(session_id, "assistant", saved)
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
+        finally:
+            # 正常结束 / 异常 / 客户端断开都要注销取消标志，避免状态残留
+            _rt_run.clear_run(session_id)
 
     return Response(generate(), mimetype="text/event-stream")
+
+
+@app.route("/run/cancel", methods=["POST"])
+def cancel_run():
+    """请求中断某个会话正在执行的任务。
+
+    协作式取消：设置该会话的取消标志，Agent 主循环会在下一个检查点
+    （下一步开始 / 下一段流式输出 / 下一个工具执行前）停下来。
+    """
+    import runtime
+
+    data = request.json or {}
+    session_id = data.get("session_id")
+    if session_id is None:
+        return jsonify({"error": "缺少 session_id"}), 400
+
+    hit = runtime.request_cancel(session_id)
+    return jsonify({"ok": True, "cancelled": hit})
 
 
 @app.route("/export/<int:session_id>", methods=["GET"])
@@ -773,6 +794,20 @@ def run_multi():
 
             yield f"data: {json.dumps({'type': 'phase', 'name': 'executor', 'status': 'done'}, ensure_ascii=False)}\n\n"
 
+            # 用户已请求停止：保存已产出的内容，但不再进入 Reviewer 审查
+            if _rt_multi.is_cancelled():
+                saved = json.dumps(
+                    {
+                        "answer": full_answer,
+                        "tools": tool_events,
+                        "tokens": token_usage,
+                    },
+                    ensure_ascii=False,
+                )
+                db.save_message(session_id, "assistant", saved)
+                yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+                return
+
             # 保存 Executor 结果
             saved = json.dumps(
                 {
@@ -801,6 +836,8 @@ def run_multi():
 
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
+        finally:
+            _rt_multi.clear_run(session_id)
 
     return Response(generate(), mimetype="text/event-stream")
 

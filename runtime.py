@@ -21,6 +21,7 @@
 """
 
 import contextvars
+import threading
 
 DEFAULT_SESSION_KEY = "__default__"
 
@@ -150,6 +151,49 @@ def clear_pending_text(session_id=None):
     _pending_texts.pop(session_key(session_id), None)
 
 
+# ===== 运行中断（按会话）=====
+# {session_key: threading.Event}
+# 每次运行都注册一个**全新**的 Event，因此上一次运行残留的「已取消」状态
+# 不会误伤下一次运行（这是最容易踩的坑：复用同一个 Event 会导致新任务刚
+# 开始就立刻自己停掉）。
+_cancel_events = {}
+_cancel_lock = threading.Lock()
+
+
+def register_run(session_id=None):
+    """开始一次运行：注册全新的取消标志并返回它。"""
+    event = threading.Event()
+    with _cancel_lock:
+        _cancel_events[session_key(session_id)] = event
+    return event
+
+
+def request_cancel(session_id=None) -> bool:
+    """请求中断某会话正在运行的任务。
+
+    返回是否命中了「正在运行」的会话；协作式取消，真正的停止发生在
+    Agent 主循环的下一个检查点。
+    """
+    with _cancel_lock:
+        event = _cancel_events.get(session_key(session_id))
+    if event is None:
+        return False
+    event.set()
+    return True
+
+
+def is_cancelled(session_id=None) -> bool:
+    """当前会话是否已被请求中断。"""
+    event = _cancel_events.get(session_key(session_id))
+    return bool(event is not None and event.is_set())
+
+
+def clear_run(session_id=None):
+    """运行结束（正常 / 异常 / 客户端断开）时注销取消标志。"""
+    with _cancel_lock:
+        _cancel_events.pop(session_key(session_id), None)
+
+
 # ===== 生命周期维护 =====
 
 def clear_session(session_id):
@@ -158,6 +202,8 @@ def clear_session(session_id):
     _project_roots.pop(key, None)
     _pending_states.pop(key, None)
     _pending_texts.pop(key, None)
+    with _cancel_lock:
+        _cancel_events.pop(key, None)
 
 
 def reset_all():
@@ -165,3 +211,5 @@ def reset_all():
     _project_roots.clear()
     _pending_states.clear()
     _pending_texts.clear()
+    with _cancel_lock:
+        _cancel_events.clear()
