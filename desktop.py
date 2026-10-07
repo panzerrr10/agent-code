@@ -3,7 +3,6 @@ AI Agent 桌面应用启动器
 用 pywebview 把 Flask 应用包装成桌面窗口
 """
 
-import subprocess
 import threading
 import time
 
@@ -14,33 +13,25 @@ from paths import WEBVIEW_DATA_DIR
 
 
 def ensure_sandbox():
-    """确保 Docker 沙箱容器在运行"""
-    try:
-        result = subprocess.run(
-            ["docker", "ps", "-q", "-f", "name=agent-sandbox"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.stdout.strip():
-            print("✅ Docker 沙箱已在运行")
-            return
+    """检查 Docker 沙箱是否就绪。
 
-        result = subprocess.run(
-            ["docker", "ps", "-aq", "-f", "name=agent-sandbox"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.stdout.strip():
-            subprocess.run(["docker", "start", "agent-sandbox"], timeout=10)
-            print("✅ 已启动 Docker 沙箱")
-        else:
-            print("⚠️ Docker 沙箱不存在，请先创建容器")
-    except FileNotFoundError:
-        print("⚠️ 未检测到 Docker，执行类工具将不可用")
-    except Exception as e:
-        print(f"⚠️ 无法检查 Docker 沙箱：{e}")
+    现在每次执行都用 `docker run --rm` 起临时容器，并把**当前项目根目录**
+    挂载成 /workspace，因此不再需要常驻的 agent-sandbox 容器，只需镜像存在。
+    """
+    import sandbox
+
+    if not sandbox.docker_available():
+        print("⚠️ 未检测到可用的 Docker：run_python / run_command 将被拒绝执行")
+        print("   如需执行代码，请先安装并启动 Docker")
+        return
+    if not sandbox.image_available():
+        print(f"⚠️ 找不到沙箱镜像 `{sandbox.IMAGE}`，执行类工具不可用")
+        print(f"   请先构建：docker build -t {sandbox.IMAGE} .")
+        return
+    print(
+        f"✅ Docker 沙箱就绪（镜像 {sandbox.IMAGE}，network={sandbox.NETWORK}，"
+        f"memory={sandbox.MEMORY}，cpus={sandbox.CPUS}）"
+    )
 
 
 def start_flask():

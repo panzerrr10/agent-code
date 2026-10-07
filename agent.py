@@ -1,5 +1,6 @@
 import json
 import os
+import secrets
 
 from config import MAX_STEPS
 from config_providers import (
@@ -103,7 +104,7 @@ def run_agent_stream(
     session_id: int = None,
     provider_id: str = None,
     max_steps: int = MAX_STEPS,
-    confirmed_delete: bool = False,
+    auto_confirm: bool = False,
     planner_plan: list = None,
     user_api_key: str = None,
     user_base_url: str = None,
@@ -508,6 +509,9 @@ def run_agent_stream(
                     else:
                         _modified_messages.append(_m)
                 _rt_save.clear_pending_state()  # 【修复 Bug1】先清空旧的，避免多轮累积
+                # 服务端签发一次性确认令牌：只有带着它回来，才允许执行下面这个工具。
+                # 放在服务端状态里，客户端拿不到就无法伪造「用户已确认」。
+                _confirm_token = secrets.token_urlsafe(32)
                 _rt_save.set_pending_state(
                     {
                         "messages": _modified_messages,
@@ -518,8 +522,10 @@ def run_agent_stream(
                             "name": _func_name,
                             "args": _func_args,
                         },
+                        "confirm_token": _confirm_token,
                     }
                 )
+                return _confirm_token
 
             for idx, tc in enumerate(assistant_msg.tool_calls):
                 # 取消检查点 3：执行任何工具之前（避免「已点停止却还在写文件」）
@@ -537,7 +543,7 @@ def run_agent_stream(
 
                 # 拦截 delete_file
                 if func_name == "delete_file":
-                    if confirmed_delete:
+                    if auto_confirm:
                         result = execute_tool(func_name, args)
                         yield {"type": "tool_result", "content": result}
                         # ✅ 失败跟踪
@@ -576,16 +582,17 @@ def run_agent_stream(
                         )
                         continue
                     else:
-                        _save_pending_with_processed(idx, tc, func_name, args)
+                        _token = _save_pending_with_processed(idx, tc, func_name, args)
                         yield {
                             "type": "confirm_delete",
                             "path": args.get("path", ""),
+                            "confirm_token": _token,
                         }
                         return
 
                 # 拦截 write_file
                 if func_name == "write_file":
-                    if confirmed_delete:
+                    if auto_confirm:
                         result = execute_tool(func_name, args)
                         yield {"type": "tool_result", "content": result}
                         messages.append(
@@ -612,12 +619,13 @@ def run_agent_stream(
                         except Exception:
                             old_content = "（无法读取原内容）"
 
-                        _save_pending_with_processed(idx, tc, func_name, args)
+                        _token = _save_pending_with_processed(idx, tc, func_name, args)
                         yield {
                             "type": "confirm_write",
                             "path": path,
                             "old_content": old_content,
                             "new_content": new_content,
+                            "confirm_token": _token,
                         }
                         return
                         # 拦截 run_command
@@ -627,7 +635,7 @@ def run_agent_stream(
                     # 检查是否安全命令
                     from tools import is_safe_command
 
-                    if is_safe_command(cmd) or confirmed_delete:
+                    if is_safe_command(cmd) or auto_confirm:
                         # 安全命令 或 用户已确认 → 直接执行
                         result = execute_tool(func_name, args)
                         yield {"type": "tool_result", "content": result}
@@ -641,16 +649,17 @@ def run_agent_stream(
                         continue
                     else:
                         # 不安全 → 弹确认
-                        _save_pending_with_processed(idx, tc, func_name, args)
+                        _token = _save_pending_with_processed(idx, tc, func_name, args)
                         yield {
                             "type": "confirm_command",
                             "cmd": cmd,
+                            "confirm_token": _token,
                         }
                         return
 
                 # 拦截 run_python
                 if func_name == "run_python":
-                    if confirmed_delete:
+                    if auto_confirm:
                         result = execute_tool(func_name, args)
                         yield {"type": "tool_result", "content": result}
                         messages.append(
@@ -662,17 +671,18 @@ def run_agent_stream(
                         )
                         continue
                     else:
-                        _save_pending_with_processed(idx, tc, func_name, args)
+                        _token = _save_pending_with_processed(idx, tc, func_name, args)
                         code_preview = (args.get("code") or "")[:300]
                         yield {
                             "type": "confirm_command",
                             "cmd": f"# run_python 执行代码：\n{code_preview}",
+                            "confirm_token": _token,
                         }
                         return
 
                 # 拦截 git_commit
                 if func_name == "git_commit":
-                    if confirmed_delete:
+                    if auto_confirm:
                         result = execute_tool(func_name, args)
                         yield {"type": "tool_result", "content": result}
                         messages.append(
@@ -684,16 +694,17 @@ def run_agent_stream(
                         )
                         continue
                     else:
-                        _save_pending_with_processed(idx, tc, func_name, args)
+                        _token = _save_pending_with_processed(idx, tc, func_name, args)
                         yield {
                             "type": "confirm_command",
                             "cmd": f"git commit: {args.get('message', '')}",
+                            "confirm_token": _token,
                         }
                         return
 
                 # 拦截 git_rollback
                 if func_name == "git_rollback":
-                    if confirmed_delete:
+                    if auto_confirm:
                         result = execute_tool(func_name, args)
                         yield {"type": "tool_result", "content": result}
                         messages.append(
@@ -705,10 +716,11 @@ def run_agent_stream(
                         )
                         continue
                     else:
-                        _save_pending_with_processed(idx, tc, func_name, args)
+                        _token = _save_pending_with_processed(idx, tc, func_name, args)
                         yield {
                             "type": "confirm_command",
                             "cmd": f"git rollback: {args}",
+                            "confirm_token": _token,
                         }
                         return
 

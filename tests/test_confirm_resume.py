@@ -136,7 +136,9 @@ def test_write_file_waits_for_confirm_then_resumes(project, monkeypatch):
             "改一下配置",
             session_id="confirm-sess",
             _resume=True,
-            confirmed_delete=True,
+            # 注意：这里刻意不传 auto_confirm。
+            # 用户在终端/界面确认的是「这一个」挂起的操作，续跑分支会执行它；
+            # 之后若再出现危险操作，必须重新询问（一次性授权）。
             user_api_key="k",
         )
     )

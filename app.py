@@ -3,6 +3,7 @@ import os
 
 from flask import Flask, Response, jsonify, render_template, request, send_file
 
+import auth
 import db
 from agent import run_agent_stream
 from config_providers import DEFAULT_PROVIDER, RAG_PROVIDER, get_provider, get_provider_list
@@ -10,6 +11,24 @@ from paths import ICON_PATH, is_path_permitted
 
 app = Flask(__name__)
 db.init_db()
+
+
+@app.before_request
+def _enforce_auth():
+    """最小鉴权：所有接口都要求 X-Auth-Token（页面外壳与静态资源除外）。
+
+    跨域页面无法设置自定义请求头、也过不了预检，因此 CSRF 路径被切断。
+    """
+    if request.method == "OPTIONS":
+        return None
+    if auth.is_public_path(request.path):
+        return None
+    if auth.verify(request.headers.get(auth.HEADER_NAME)):
+        return None
+    return (
+        jsonify({"error": "未授权：缺少或无效的 X-Auth-Token", "code": "unauthorized"}),
+        401,
+    )
 
 
 def _pack_user_content(task: str, images=None) -> str:
@@ -178,7 +197,8 @@ def file_content():
 # ============ 页面 ============
 @app.route("/")
 def index():
-    return render_template("index.html")
+    # 把访问令牌注入页面：跨域页面读不到本响应内容，因此不会因此泄露
+    return render_template("index.html", auth_token=auth.get_token())
 
 
 # ============ 会话接口 ============
@@ -226,8 +246,10 @@ def run():
     data = request.json
     task = data.get("task", "").strip()
     session_id = data.get("session_id")
-    confirmed_delete = data.get("confirmed_delete", False)
     resume = data.get("resume", False)   # 用户点 ✓ 后“续跑”：复用 pending state，从原 step 继续
+    # 注意：这里不再读取客户端传来的 confirmed_delete。
+    # 「用户是否真的确认过」必须由服务端签发的一次性令牌证明（见 generate() 内的校验），
+    # 否则任何人构造一个 confirmed_delete=true 就能跳过所有人工确认。
 
     if not task and not resume:
         return Response(
@@ -253,6 +275,24 @@ def run():
 
         _rt_run.set_session_id(session_id)
         try:
+            # 【服务端强制确认】续跑必须先出示服务端签发的一次性令牌。
+            # 只带 resume=true 而没有令牌 → 拒绝，挂起的危险操作不会被执行。
+            if resume and not _rt_run.verify_and_consume_confirm_token(
+                session_id, data.get("confirm_token")
+            ):
+                yield (
+                    "data: "
+                    + json.dumps(
+                        {
+                            "type": "error",
+                            "content": "确认令牌无效或已过期，请重新发起任务",
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n\n"
+                )
+                return
+
             # 保存用户任务（图片以 Base64 data URL 一起入库，刷新后历史仍可回显）
             images = data.get("images") or []   # 多模态图片（data URL 数组）
             if not resume:
@@ -297,7 +337,8 @@ def run():
                 task,
                 session_id=session_id,
                 provider_id=provider_id,
-                confirmed_delete=confirmed_delete,
+                # HTTP 层永不自动确认：每一次危险操作都必须单独走一次确认
+                auto_confirm=False,
                 _resume=resume,
                 user_api_key=user_api_key,
                 user_base_url=user_base_url,
@@ -682,6 +723,23 @@ def run_multi():
 
         _rt_multi.set_session_id(session_id)
         try:
+            # 【服务端强制确认】与 /run 一致：续跑必须出示一次性确认令牌
+            if resume and not _rt_multi.verify_and_consume_confirm_token(
+                session_id, data.get("confirm_token")
+            ):
+                yield (
+                    "data: "
+                    + json.dumps(
+                        {
+                            "type": "error",
+                            "content": "确认令牌无效或已过期，请重新发起任务",
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n\n"
+                )
+                return
+
             # 批次 6：三角色各自可以独立选 provider，默认继承 executor 的
             executor_provider_id = data.get("provider_id") or DEFAULT_PROVIDER
             planner_provider_id = data.get("planner_provider_id") or executor_provider_id

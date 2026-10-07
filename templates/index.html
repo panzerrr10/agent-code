@@ -11,6 +11,46 @@
     <!-- highlight.js 代码高亮 -->
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/github-dark.min.css') }}">
     <script src="{{ url_for('static', filename='vendor/highlight.min.js') }}"></script>
+    <script>
+        // 服务端注入的访问令牌。跨域页面读不到本页面内容，因此不会泄露；
+        // 所有同源 fetch 自动带上 X-Auth-Token —— 跨域请求无法设置自定义头，CSRF 由此被切断。
+        window.AUTH_TOKEN = {{ auth_token | tojson }};
+        (function () {
+            const _fetch = window.fetch.bind(window);
+            window.fetch = function (input, init) {
+                init = init || {};
+                const url = (typeof input === "string") ? input : ((input && input.url) || "");
+                if (url.startsWith("/") || url.startsWith(location.origin)) {
+                    const headers = new Headers(init.headers || {});
+                    headers.set("X-Auth-Token", window.AUTH_TOKEN || "");
+                    init.headers = headers;
+                }
+                return _fetch(input, init);
+            };
+        })();
+
+        // 导出走 fetch + Blob：导航式下载带不了自定义请求头，会 401
+        async function downloadExport(fmt, fallbackName) {
+            try {
+                const res = await fetch(`/export/${currentSessionId}?format=${fmt}`);
+                if (!res.ok) {
+                    alert(`导出失败（HTTP ${res.status}）`);
+                    return;
+                }
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `${fallbackName || "对话记录"}.${fmt}`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                alert("导出失败：" + e.message);
+            }
+        }
+    </script>
     <style>
         :root {
             --bg-page: #f0f2f5;
@@ -1698,6 +1738,8 @@
                     task: "",
                     session_id: sessionId,
                     resume: true,   // 关键：让后端从 pending state 续跑，而不是重新开始
+                    // 服务端签发的一次性确认令牌：没有它，后端会拒绝执行挂起的危险操作
+                    confirm_token: ctx.confirmToken || null,
                     // 用 Executor 的 provider / model，保持与中断时一致
                     provider_id: (multiAgentMode ? (roleSelection.executor.providerId || currentProviderId) : currentProviderId) || null,
                     model: (multiAgentMode ? (roleSelection.executor.model || currentModelName) : currentModelName) || null,
@@ -1774,10 +1816,13 @@
                                     }
                                 }
                             } else if (ev.type === "confirm_delete") {
+                                ctx.confirmToken = ev.confirm_token;
                                 showDeleteConfirm(ctx, ev.path, "");
                             } else if (ev.type === "confirm_write") {
+                                ctx.confirmToken = ev.confirm_token;
                                 showWriteConfirm(ctx, ev.path, ev.old_content, ev.new_content);
                             } else if (ev.type === "confirm_command") {
+                                ctx.confirmToken = ev.confirm_token;
                                 showCommandConfirm(ctx, ev.cmd);
                             } else if (ev.type === "plan_update") {
                                 renderPlan(ev.plan);
@@ -2204,6 +2249,7 @@
                     // 补渲染 pendingConfirm（缺口 1 修复）
                     if (st.pendingConfirm) {
                         const ev = st.pendingConfirm;
+                        restored.confirmToken = ev.confirm_token;   // 切回会话时恢复一次性令牌
                         if (ev.type === "confirm_write") {
                             showWriteConfirm(restored, ev.path, ev.old_content, ev.new_content);
                         } else if (ev.type === "confirm_delete") {
@@ -2897,10 +2943,13 @@
                                 }
                             } else if (ev.type === "confirm_delete") {
                                 // 显示确认按钮
+                                ctx.confirmToken = ev.confirm_token;   // 记住一次性令牌，确认时回传
                                 showDeleteConfirm(ctx, ev.path, task);
                             } else if (ev.type === "confirm_write") {
+                                ctx.confirmToken = ev.confirm_token;
                                 showWriteConfirm(ctx, ev.path, ev.old_content, ev.new_content);
                             } else if (ev.type === "confirm_command") {
+                                ctx.confirmToken = ev.confirm_token;
                                 showCommandConfirm(ctx, ev.cmd);
                             } else if (ev.type === "plan_update") {
                                 renderPlan(ev.plan);
@@ -3087,11 +3136,8 @@
                 alert("当前没有选中的会话");
                 return;
             }
-            const a = document.createElement("a");
-            a.href = `/export/${currentSessionId}`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+            // 走 fetch + Blob（自动带鉴权头）；导航式下载带不了自定义头
+            downloadExport("md", "对话记录");
         }
 
         (function initTheme() {
@@ -3299,7 +3345,7 @@
                 alert("当前没有选中的会话");
                 return;
             }
-            window.location.href = `/export/${currentSessionId}?format=${fmt}`;
+            downloadExport(fmt, "对话记录");
             document.getElementById("exportMenu").style.display = "none";
         }
 

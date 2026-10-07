@@ -3,8 +3,10 @@ import shlex
 import subprocess
 
 import rag
+import sandbox
 from config import MAX_FILE_SIZE, MAX_LIST_ITEMS
 from paths import TRASH_DIR, is_allowed_path
+from state_store import SessionStateStore
 
 # ============ 工具实现 ============
 
@@ -373,69 +375,80 @@ def edit_file(path: str, old_text: str, new_text: str) -> str:
         return f"❌ 编辑失败：{e}"
 
 
-_DOCKER_OK = None
+def _truncate(text: str, limit: int) -> str:
+    if len(text) > limit:
+        return text[:limit] + "\n\n...（输出被截断）"
+    return text
 
-def _check_docker() -> bool:
-    """检查 Docker 是否可用。"""
+
+def _host_run_python(code: str, timeout: int) -> str:
+    """宿主机兜底执行 Python（仅在 AGENT_ALLOW_HOST_EXEC=1 时才会走到）。"""
+    import sys
+    import tempfile
+
+    import runtime
+
+    path = None
     try:
-        r = subprocess.run(["docker", "info"], capture_output=True, timeout=3)
-        return r.returncode == 0
-    except Exception:
-        return False
-
-
-def run_python(code: str, timeout: int = 30) -> str:
-    """
-    在 Docker 沙箱里执行 Python 代码。
-    - code: Python 源码字符串
-    - timeout: 超时秒数（默认 30）
-    """
-    global _DOCKER_OK
-    if _DOCKER_OK is None:
-        _DOCKER_OK = _check_docker()
-    if not _DOCKER_OK:
-        return "❌ 当前环境未安装 Docker，无法执行代码。请安装 Docker Desktop 后重试。"
-
-    # 检查代码长度
-    if len(code) > 50_000:
-        return "❌ 代码太长（超过 50000 字符）"
-
-    try:
-        # 用 base64 编码，避免 shell 转义问题
-        import base64
-
-        encoded = base64.b64encode(code.encode("utf-8")).decode("ascii")
-
-        # 构造命令：把 base64 传进容器，解码后执行
-        inner_cmd = (
-            f"echo {encoded} | base64 -d > /tmp/_agent_run.py && "
-            f"cd /workspace && python /tmp/_agent_run.py"
-        )
-
-        result = subprocess.run(
-            ["docker", "exec", "agent-sandbox", "sh", "-c", inner_cmd],
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".py", delete=False, encoding="utf-8"
+        ) as f:
+            f.write(code)
+            path = f.name
+        r = subprocess.run(
+            [sys.executable, path],
+            cwd=runtime.get_project_root(),
             capture_output=True,
             text=True,
             timeout=timeout,
         )
-
-        # 拼输出
-        output = ""
-        if result.stdout:
-            output += "【stdout】\n" + result.stdout
-        if result.stderr:
-            output += "\n【stderr】\n" + result.stderr
-        output += f"\n\n【退出码】{result.returncode}"
-
-        # 截断过长输出
-        if len(output) > 5000:
-            output = output[:5000] + "\n\n...（输出被截断）"
-
-        return output
+        out = ""
+        if r.stdout:
+            out += f"【stdout】\n{r.stdout}"
+        if r.stderr:
+            out += f"\n【stderr】\n{r.stderr}"
+        out += f"\n\n【退出码】{r.returncode}"
+        return sandbox.HOST_EXEC_NOTICE + out
     except subprocess.TimeoutExpired:
         return f"❌ 执行超时（>{timeout} 秒），已强制终止"
     except Exception as e:
         return f"❌ 执行失败：{e}"
+    finally:
+        if path:
+            try:
+                os.unlink(path)
+            except Exception:
+                pass
+
+
+def run_python(code: str, timeout: int = 30) -> str:
+    """在 Docker 沙箱里执行 Python 代码。
+
+    - code: Python 源码字符串
+    - timeout: 超时秒数（默认 30）
+
+    沙箱内的工作目录是**挂载进来的真实项目根目录**，与 read_file / write_file
+    等文件工具看到的是同一份文件（早期实现挂的是 ~/ai_workspace，两者不一致）。
+    """
+    import runtime
+
+    if len(code) > 50_000:
+        return "❌ 代码太长（超过 50000 字符）"
+
+    # 用 base64 编码后写进容器，避免 shell 转义问题
+    import base64
+
+    encoded = base64.b64encode(code.encode("utf-8")).decode("ascii")
+    script = (
+        f"echo {encoded} | base64 -d > /tmp/_agent_run.py && "
+        f"cd /workspace && python /tmp/_agent_run.py"
+    )
+
+    res = sandbox.run_script(script, timeout, runtime.get_project_root())
+    if not res.ran:
+        # 只有用户显式设置 AGENT_ALLOW_HOST_EXEC=1 才可能走到这里
+        return _host_run_python(code, timeout)
+    return _truncate(res.output, 5000)
 
 
 # 危险命令黑名单
@@ -463,17 +476,14 @@ BANNED_PATTERNS = [
 
 
 def run_command(cmd: str, timeout: int = 15) -> str:
-    """
-    在 Docker 沙箱里执行 shell 命令。
-    - 命令只在 /workspace 目录下执行
-    - 有 15 秒超时
+    """在 Docker 沙箱里执行 shell 命令。
+
+    - 命令只在挂载的项目根目录（容器内 /workspace）下执行
+    - 默认 15 秒超时
     - 危险命令被黑名单拦截
+    - Docker 不可用时**拒绝执行**（除非显式设置 AGENT_ALLOW_HOST_EXEC=1）
     """
-    global _DOCKER_OK
-    if _DOCKER_OK is None:
-        _DOCKER_OK = _check_docker()
-    if not _DOCKER_OK:
-        return "❌ 当前环境未安装 Docker，无法执行代码。请安装 Docker Desktop 后重试。"
+    import runtime
 
     if not cmd or not cmd.strip():
         return "❌ 命令为空"
@@ -487,29 +497,34 @@ def run_command(cmd: str, timeout: int = 15) -> str:
         if banned.lower() in cmd_lower:
             return f"❌ 命令被拒绝：包含禁止的关键字 `{banned}`"
 
-    try:
-        # 强制在 /workspace 目录下执行
-        inner = f"cd /workspace && {cmd}"
+    script = f"cd /workspace && {cmd}"
+    res = sandbox.run_script(script, timeout, runtime.get_project_root())
+    if not res.ran:
+        # 只有显式开启 AGENT_ALLOW_HOST_EXEC 才会走到这里
+        return _host_run_shell(cmd, timeout)
+    return _truncate(res.output, 3000)
 
-        result = subprocess.run(
-            ["docker", "exec", "agent-sandbox", "sh", "-c", inner],
+
+def _host_run_shell(cmd: str, timeout: int) -> str:
+    """宿主机兜底执行 shell 命令（仅在 AGENT_ALLOW_HOST_EXEC=1 时使用）。"""
+    import runtime
+
+    try:
+        r = subprocess.run(
+            cmd,
+            shell=True,
+            cwd=runtime.get_project_root(),
             capture_output=True,
             text=True,
             timeout=timeout,
         )
-
-        output = ""
-        if result.stdout:
-            output += "【stdout】\n" + result.stdout
-        if result.stderr:
-            output += "\n【stderr】\n" + result.stderr
-        output += f"\n\n【退出码】{result.returncode}"
-
-        # 截断
-        if len(output) > 3000:
-            output = output[:3000] + "\n\n...（输出被截断）"
-
-        return output
+        out = ""
+        if r.stdout:
+            out += f"【stdout】\n{r.stdout}"
+        if r.stderr:
+            out += f"\n【stderr】\n{r.stderr}"
+        out += f"\n\n【退出码】{r.returncode}"
+        return sandbox.HOST_EXEC_NOTICE + _truncate(out, 3000)
     except subprocess.TimeoutExpired:
         return f"❌ 执行超时（>{timeout} 秒），已强制终止"
     except Exception as e:
@@ -601,9 +616,9 @@ def is_safe_command(cmd: str) -> bool:
     return False
 
 
-# ============ 计划管理（按会话隔离的内存存储）============
-
-_plans = {}  # {session_key: [{"step": "...", "status": "pending"}, ...]}
+# ============ 计划管理（按会话隔离 + 落库）============
+# 计划原先只在内存里，服务一重启 Planner 的拆解结果就没了。这里写穿到 SQLite。
+_plan_store = SessionStateStore("plan")
 
 
 def _plan_key() -> str:
@@ -613,15 +628,21 @@ def _plan_key() -> str:
 
 
 def _plan_list():
-    """取当前会话的计划列表（不存在则创建）。"""
-    return _plans.setdefault(_plan_key(), [])
+    """取当前会话的计划列表（不存在时返回空列表，不写库）。"""
+    plan = _plan_store.get(_plan_key())
+    return plan if isinstance(plan, list) else []
 
 
 def clear_plan(session_id=None):
-    """清理某个会话的计划（删除会话时调用）。"""
+    """清理某个会话的计划（删除会话时调用，内存与库都清）。"""
     import runtime
 
-    _plans.pop(runtime.session_key(session_id), None)
+    _plan_store.pop(runtime.session_key(session_id))
+
+
+def reset_plans():
+    """清空所有会话的计划（测试用）。"""
+    _plan_store.purge_all()
 
 
 def create_plan(steps) -> str:
@@ -660,7 +681,7 @@ def create_plan(steps) -> str:
         return "❌ 解析后步骤列表为空"
 
     plan = [{"step": s, "status": "pending"} for s in steps]
-    _plans[_plan_key()] = plan
+    _plan_store.set(_plan_key(), plan)
     lines = ["📋 已创建计划："]
     for i, item in enumerate(plan, 1):
         lines.append(f"  {i}. [ ] {item['step']}")
@@ -678,6 +699,7 @@ def update_plan(step_index: int, status: str) -> str:
         return "❌ status 必须是 done / failed / doing"
 
     plan[step_index - 1]["status"] = status
+    _plan_store.set(_plan_key(), plan)  # 写回，确保落库（列表是原地修改）
 
     lines = ["📋 更新后的计划："]
     for i, item in enumerate(plan, 1):
@@ -978,36 +1000,28 @@ def multi_edit(edits: list) -> str:
 
 
 def _run_git_local(args: list) -> str:
-    """在宿主机直接跑 git（不走 Docker 容器）。
+    """执行 git（优先在 Docker 沙箱里，项目根目录挂载为 /workspace）。
 
-    args 必须是**参数列表**，且绝不经过 shell：
-    否则 LLM 生成的 commit message / commit ref 可拼接 shell 元字符，
-    直接在宿主机上执行任意命令。
+    args 必须是**参数列表**：沙箱路径会把每个参数用 shlex.quote 转义后再拼成
+    shell 脚本，因此 commit message / commit ref 里的引号、分号都不会被解释。
+
+    git 属于受控命令，Docker 不可用时允许回退宿主机执行，但输出里会明确标注
+    「未启用沙箱」，避免用户误以为仍在隔离环境里。
     """
-    import os
-    import subprocess
-
     import runtime
+
     root = runtime.get_project_root()
     if not os.path.isdir(root):
         return f"❌ 项目目录不存在：{root}"
-    try:
-        r = subprocess.run(
-            ["git", "-C", root, *args],
-            shell=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        out = ""
-        if r.stdout:
-            out += r.stdout
-        if r.stderr:
-            out += "\n【stderr】\n" + r.stderr
-        out += f"\n【退出码】{r.returncode}"
-        return out
-    except Exception as e:
-        return f"❌ git 执行失败：{e}"
+
+    res = sandbox.run_argv(["git", *args], 10, root, allow_host_fallback=True)
+    if res.ran:
+        return res.output
+
+    # 回退：宿主机执行（参数列表，shell=False）
+    return sandbox.HOST_EXEC_NOTICE + _run_subprocess(
+        ["git", "-C", root, *args], root, 10
+    )
 
 
 def _run_subprocess(cmd: list, cwd: str, timeout: int) -> str:
@@ -1037,20 +1051,28 @@ def run_tests(path: str = "") -> str:
     """自动识别项目测试框架并跑测试。
 
     path: 可选，测试文件或目录路径。留空则自动识别。
-    全部以参数列表执行（shell=False），工作目录固定为项目根，
-    避免 LLM 传入的路径被拼接进 shell 命令。
+
+    **默认在宿主机执行**：跑测试需要项目自身的虚拟环境与依赖，而沙箱镜像里
+    只有通用依赖，用容器解释器跑项目测试往往直接失败。
+    若希望测试也进沙箱，设置 ``AGENT_TESTS_IN_SANDBOX=1``（此时改用镜像自带的
+    python，且容器默认无网络）。
     """
     import os
 
     import runtime
+
     root = runtime.get_project_root()
     if not os.path.isdir(root):
         return f"❌ 项目目录不存在：{root}"
 
-    # 优先用项目 venv 的 python
-    venv_python = os.path.join(root, ".venv", "bin", "python")
-    if not os.path.exists(venv_python):
-        venv_python = "python3"  # fallback
+    use_sandbox = sandbox.TESTS_IN_SANDBOX
+    if use_sandbox:
+        # 容器内跑：宿主机的 .venv 在容器里解释器是断的，只能用镜像自带的 python
+        venv_python = "python3"
+    else:
+        venv_python = os.path.join(root, ".venv", "bin", "python")
+        if not os.path.exists(venv_python):
+            venv_python = "python3"  # fallback
 
     # 测试目标必须位于项目根之内，避免越界执行
     target = (path or "").strip()
@@ -1062,21 +1084,29 @@ def run_tests(path: str = "") -> str:
         if not (cand == root_real or cand.startswith(root_real + os.sep)):
             return f"❌ 测试路径必须位于项目目录内：{path}"
 
+    def _run(cmd: list) -> str:
+        if use_sandbox:
+            res = sandbox.run_argv(cmd, 120, root, allow_host_fallback=True)
+            if res.ran:
+                return res.output
+            return sandbox.HOST_EXEC_NOTICE + _run_subprocess(cmd, root, 120)
+        return _run_subprocess(cmd, root, 120)
+
     has_package_json = os.path.exists(os.path.join(root, "package.json"))
     has_cargo = os.path.exists(os.path.join(root, "Cargo.toml"))
     has_go = os.path.exists(os.path.join(root, "go.mod"))
 
     if has_package_json:
-        out = _run_subprocess(["npm", "test"], root, 120)
+        out = _run(["npm", "test"])
     elif has_cargo:
-        out = _run_subprocess(["cargo", "test"], root, 120)
+        out = _run(["cargo", "test"])
     elif has_go:
-        out = _run_subprocess(["go", "test", "./..."], root, 120)
+        out = _run(["go", "test", "./..."])
     else:
         pytest_cmd = [venv_python, "-m", "pytest", "-v"]
         if target:
             pytest_cmd.append(target)
-        out = _run_subprocess(pytest_cmd, root, 120)
+        out = _run(pytest_cmd)
         # pytest 失败 / 不可用时回退 unittest（与原 `||` 语义一致）
         if "【退出码】0" not in out:
             if target and target.endswith(".py"):
@@ -1085,7 +1115,7 @@ def run_tests(path: str = "") -> str:
                 uni_cmd = [venv_python, "-m", "unittest", "-v", module]
             else:
                 uni_cmd = [venv_python, "-m", "unittest", "discover", "-v", "-s", root]
-            out += "\n\n【回退 unittest】\n" + _run_subprocess(uni_cmd, root, 120)
+            out += "\n\n【回退 unittest】\n" + _run(uni_cmd)
 
     if len(out) > 8000:
         out = out[:8000] + "\n\n...（输出被截断）"

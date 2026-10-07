@@ -40,7 +40,8 @@ BASE_DIR = get_base_dir()
 RESOURCE_DIR = get_resource_dir()
 DATA_DIR = get_data_dir()
 
-DB_PATH = os.path.join(DATA_DIR, "chat.db")
+# 允许用环境变量把数据库指到别处（测试用独立临时库，避免污染真实数据）
+DB_PATH = os.environ.get("AGENT_DB_PATH") or os.path.join(DATA_DIR, "chat.db")
 CHROMA_DIR = os.path.join(DATA_DIR, "chroma_db")
 TRASH_DIR = os.path.join(DATA_DIR, ".trash")
 BACKUP_DIR = os.path.join(DATA_DIR, ".backup")

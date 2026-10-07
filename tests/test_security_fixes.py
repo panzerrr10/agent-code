@@ -223,10 +223,18 @@ def test_reviewer_preserves_failed_verdict(monkeypatch):
 # ============ 端点与密钥 ============
 
 
-def test_execute_endpoint_is_gone():
+def _auth_client():
+    """带鉴权头的测试客户端（服务端已强制 X-Auth-Token）。"""
     import app as app_module
+    import auth
 
-    client = app_module.app.test_client()
+    c = app_module.app.test_client()
+    c.environ_base["HTTP_X_AUTH_TOKEN"] = auth.get_token()
+    return c
+
+
+def test_execute_endpoint_is_gone():
+    client = _auth_client()
     resp = client.post(
         "/execute",
         json={"session_id": 1, "tool_name": "list_dir", "tool_args": {}},
@@ -235,9 +243,7 @@ def test_execute_endpoint_is_gone():
 
 
 def test_file_content_rejects_sensitive_path():
-    import app as app_module
-
-    client = app_module.app.test_client()
+    client = _auth_client()
     resp = client.get(
         "/api/file_content", query_string={"path": os.path.join(HOME, ".ssh", "id_rsa")}
     )

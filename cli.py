@@ -66,7 +66,12 @@ def print_event(event, verbose=True):
 
 
 def run_task(task: str, project: str, config: dict, verbose: bool = True, confirmed: bool = False, _resume: bool = False, session_id: int = None):
-    """执行一次任务。confirmed=True 时自动确认危险操作。"""
+    """执行一次任务。
+
+    confirmed=True 表示「本次运行内所有危险操作都不再询问」（对应 --yes，用于自动化）。
+    正常的交互确认不走这个开关：用户敲 y 之后会用 _resume=True 续跑，
+    挂起的那个工具由续跑分支执行，后续新出现的危险操作仍会再次询问。
+    """
     import runtime
     from agent import run_agent_stream
 
@@ -117,7 +122,7 @@ def run_task(task: str, project: str, config: dict, verbose: bool = True, confir
         for event in run_agent_stream(
             task,
             session_id=session_id,
-            confirmed_delete=confirmed,
+            auto_confirm=confirmed,
             _resume=_resume,
             user_api_key=config["api_key"] or None,
             user_base_url=config["base_url"] or None,
@@ -187,14 +192,14 @@ def run_task(task: str, project: str, config: dict, verbose: bool = True, confir
             answer = "n"
 
         if answer in ("y", "yes"):
-            # 用户确认，带 confirmed=True 重跑
+            # 只确认「这一个」挂起操作：续跑时不再自动确认后续的危险操作
             print("\033[32m[已确认，继续]\033[0m")
-            run_task(task, project, config, verbose=verbose, confirmed=True, _resume=True, session_id=session_id)
+            run_task(task, project, config, verbose=verbose, confirmed=False, _resume=True, session_id=session_id)
         else:
             print("\033[31m[已取消]\033[0m")
 
 
-def interactive_mode(project: str, config: dict, verbose: bool, session_id: int = None):
+def interactive_mode(project: str, config: dict, verbose: bool, session_id: int = None, auto_confirm: bool = False):
     """交互模式（REPL）。"""
     import db
 
@@ -286,7 +291,14 @@ def interactive_mode(project: str, config: dict, verbose: bool, session_id: int 
             print()
             continue
 
-        run_task(task, project, config, verbose=verbose, session_id=session_id)
+        run_task(
+            task,
+            project,
+            config,
+            verbose=verbose,
+            confirmed=auto_confirm,
+            session_id=session_id,
+        )
 
 
 def main():
@@ -302,6 +314,12 @@ def main():
     parser.add_argument("--api-key", help="API Key（覆盖 .env）")
     parser.add_argument("--base-url", help="Base URL（覆盖 .env）")
     parser.add_argument("--model", help="模型名（覆盖 .env）")
+    parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="自动化模式：本次运行内所有危险操作都不再询问（默认逐个确认）",
+    )
 
     args = parser.parse_args()
 
@@ -325,7 +343,7 @@ def main():
     verbose = not args.quiet
 
     if args.interactive:
-        interactive_mode(args.project, config, verbose, session_id=args.session)
+        interactive_mode(args.project, config, verbose, session_id=args.session, auto_confirm=args.yes)
     else:
         if not args.task:
             parser.print_help()
@@ -333,7 +351,14 @@ def main():
         # 单次任务：默认新建会话
         import db
         sid = args.session if args.session else db.create_session("CLI 会话")
-        run_task(args.task, args.project, config, verbose=verbose, session_id=sid)
+        run_task(
+            args.task,
+            args.project,
+            config,
+            verbose=verbose,
+            confirmed=args.yes,
+            session_id=sid,
+        )
 
 
 if __name__ == "__main__":

@@ -21,7 +21,10 @@
 """
 
 import contextvars
+import secrets
 import threading
+
+from state_store import SessionStateStore
 
 DEFAULT_SESSION_KEY = "__default__"
 
@@ -104,51 +107,74 @@ def get_effective_rag_base_url():
     return _rag_base_url_var.get() or os.getenv("RAG_BASE_URL", "")
 
 
-# ===== 项目根目录（按会话分桶，跨请求保留）=====
-_project_roots = {}  # {session_key: path}
+# ===== 项目根目录（按会话分桶 + 落库，跨请求保留）=====
+_project_root_store = SessionStateStore("project_root")
 
 
 def set_project_root(path: str, session_id=None):
-    _project_roots[session_key(session_id)] = path
+    _project_root_store.set(session_key(session_id), path)
 
 
 def get_project_root(session_id=None):
     import os
-    return _project_roots.get(session_key(session_id)) or os.path.expanduser("~")
+    return _project_root_store.get(session_key(session_id)) or os.path.expanduser("~")
 
 
-# ===== Pending Session（中断续跑，按会话分桶）=====
-# {session_key: {'messages': [...], 'step': N, 'task': '...', 'pending_tool': {...}}}
-_pending_states = {}
+# ===== Pending Session（中断续跑，按会话分桶 + 落库）=====
+# {'messages': [...], 'step': N, 'task': '...', 'pending_tool': {...}, 'confirm_token': ...}
+#
+# 带 24 小时 TTL：服务重启后仍能恢复「刚刚挂起的确认」，
+# 但不会翻出一周前的旧确认让用户误点。
+_pending_store = SessionStateStore("pending", ttl_seconds=24 * 3600)
 
 
 def set_pending_state(state, session_id=None):
     """保存中断状态：{'messages': [...], 'step': N, 'task': '...'}"""
-    _pending_states[session_key(session_id)] = state
+    _pending_store.set(session_key(session_id), state)
 
 
 def get_pending_state(session_id=None):
-    return _pending_states.get(session_key(session_id))
+    return _pending_store.get(session_key(session_id))
 
 
 def clear_pending_state(session_id=None):
-    _pending_states.pop(session_key(session_id), None)
+    _pending_store.pop(session_key(session_id))
 
 
-# ===== Pending Text（确认前已输出的文本，按会话分桶）=====
-_pending_texts = {}  # {session_key: text}
+def verify_and_consume_confirm_token(session_id, token) -> bool:
+    """校验并**消费**一次性确认令牌（防重放）。
+
+    令牌由 agent 在「需要人工确认」时生成并写进 pending_state。
+    只有把它原样带回来，才允许执行那个挂起的危险操作——
+    这样就杜绝了「只发一个 resume=true 就能跳过确认」的绕过。
+    """
+    if not token:
+        return False
+    state = get_pending_state(session_id)
+    if not state:
+        return False
+    expected = state.get("confirm_token")
+    if not expected or not secrets.compare_digest(str(expected), str(token)):
+        return False
+    state.pop("confirm_token", None)  # 一次性：校验通过立刻作废
+    set_pending_state(state, session_id)
+    return True
+
+
+# ===== Pending Text（确认前已输出的文本，按会话分桶 + 落库）=====
+_pending_text_store = SessionStateStore("pending_text")
 
 
 def set_pending_text(text: str, session_id=None):
-    _pending_texts[session_key(session_id)] = text
+    _pending_text_store.set(session_key(session_id), text)
 
 
 def get_pending_text(session_id=None) -> str:
-    return _pending_texts.get(session_key(session_id), "")
+    return _pending_text_store.get(session_key(session_id), "")
 
 
 def clear_pending_text(session_id=None):
-    _pending_texts.pop(session_key(session_id), None)
+    _pending_text_store.pop(session_key(session_id))
 
 
 # ===== 运行中断（按会话）=====
@@ -197,19 +223,31 @@ def clear_run(session_id=None):
 # ===== 生命周期维护 =====
 
 def clear_session(session_id):
-    """清理某个会话的全部粘性状态（删除会话时调用，避免内存泄漏）。"""
+    """清理某个会话的全部粘性状态（删除会话时调用，内存与库都清）。"""
     key = str(session_id)
-    _project_roots.pop(key, None)
-    _pending_states.pop(key, None)
-    _pending_texts.pop(key, None)
+    _project_root_store.pop(key)
+    _pending_store.pop(key)
+    _pending_text_store.pop(key)
     with _cancel_lock:
         _cancel_events.pop(key, None)
+    try:  # 计划由 tools 持有，避免循环导入所以延迟引用
+        import tools
+
+        tools.clear_plan(session_id)
+    except Exception:
+        pass
 
 
 def reset_all():
-    """清空全部粘性状态（测试用）。"""
-    _project_roots.clear()
-    _pending_states.clear()
-    _pending_texts.clear()
+    """清空全部粘性状态（测试用：内存与持久化一起清，避免旧值复活）。"""
+    _project_root_store.purge_all()
+    _pending_store.purge_all()
+    _pending_text_store.purge_all()
     with _cancel_lock:
         _cancel_events.clear()
+    try:
+        import tools
+
+        tools.reset_plans()
+    except Exception:
+        pass

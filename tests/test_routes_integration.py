@@ -13,6 +13,7 @@ import tempfile
 import pytest
 
 import app as app_module
+import auth
 import runtime
 
 HOME = os.path.expanduser("~")
@@ -87,7 +88,9 @@ def _sse(body: str):
 def client():
     runtime.reset_all()
     runtime.set_session_id(None)
-    yield app_module.app.test_client()
+    c = app_module.app.test_client()
+    c.environ_base["HTTP_X_AUTH_TOKEN"] = auth.get_token()
+    yield c
     runtime.reset_all()
     runtime.set_session_id(None)
 

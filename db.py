@@ -62,6 +62,18 @@ def init_db():
         )
     """)
 
+    # 运行时状态（断点续跑的挂起状态 / 计划 / 项目根目录）
+    # 之前这些只存在内存里，服务一重启就丢：用户点「确认」会找不到挂起状态。
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS runtime_state (
+            session_key TEXT NOT NULL,
+            kind        TEXT NOT NULL,
+            payload     TEXT NOT NULL,
+            updated_at  REAL NOT NULL,
+            PRIMARY KEY (session_key, kind)
+        )
+    """)
+
     # 索引：读会话历史是最热路径（WHERE session_id ORDER BY id）
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, id)"
@@ -71,6 +83,9 @@ def init_db():
     )
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_documents_created ON documents(created_at DESC)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_runtime_state_kind ON runtime_state(kind)"
     )
 
     conn.commit()
@@ -222,5 +237,56 @@ def delete_memory(memory_id: int):
     conn = _connect()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+    conn.commit()
+    conn.close()
+
+
+# ============ 运行时状态（会话级粘性状态落库）============
+def upsert_runtime_state(session_key: str, kind: str, payload: str, updated_at: float):
+    """写入 / 覆盖某会话某类状态的 JSON 载荷。"""
+    conn = _connect()
+    conn.execute(
+        """
+        INSERT INTO runtime_state (session_key, kind, payload, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(session_key, kind) DO UPDATE SET
+            payload = excluded.payload,
+            updated_at = excluded.updated_at
+        """,
+        (session_key, kind, payload, updated_at),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_runtime_state(session_key: str, kind: str):
+    """读取某会话某类状态，返回 (payload, updated_at)；不存在返回 None。"""
+    conn = _connect()
+    row = conn.execute(
+        "SELECT payload, updated_at FROM runtime_state WHERE session_key = ? AND kind = ?",
+        (session_key, kind),
+    ).fetchone()
+    conn.close()
+    return (row[0], row[1]) if row else None
+
+
+def delete_runtime_state(session_key: str, kind: str = None):
+    """删除某会话的状态；kind 为空时删除该会话的全部状态。"""
+    conn = _connect()
+    if kind is None:
+        conn.execute("DELETE FROM runtime_state WHERE session_key = ?", (session_key,))
+    else:
+        conn.execute(
+            "DELETE FROM runtime_state WHERE session_key = ? AND kind = ?",
+            (session_key, kind),
+        )
+    conn.commit()
+    conn.close()
+
+
+def delete_runtime_state_kind(kind: str):
+    """删除某一类状态的全部记录（测试清理用）。"""
+    conn = _connect()
+    conn.execute("DELETE FROM runtime_state WHERE kind = ?", (kind,))
     conn.commit()
     conn.close()

@@ -72,14 +72,23 @@ def test_clear_session_also_clears_cancel_flag():
 # ============ HTTP 端点 ============
 
 
+def _client():
+    """带鉴权头的测试客户端。"""
+    import auth
+
+    c = app_module.app.test_client()
+    c.environ_base["HTTP_X_AUTH_TOKEN"] = auth.get_token()
+    return c
+
+
 def test_cancel_endpoint_requires_session_id():
-    client = app_module.app.test_client()
+    client = _client()
     resp = client.post("/run/cancel", json={})
     assert resp.status_code == 400
 
 
 def test_cancel_endpoint_reports_miss_for_idle_session():
-    client = app_module.app.test_client()
+    client = _client()
     resp = client.post("/run/cancel", json={"session_id": 999999})
     assert resp.status_code == 200
     assert resp.get_json() == {"ok": True, "cancelled": False}
@@ -87,7 +96,7 @@ def test_cancel_endpoint_reports_miss_for_idle_session():
 
 def test_cancel_endpoint_hits_running_session():
     runtime.register_run(4242)
-    client = app_module.app.test_client()
+    client = _client()
     resp = client.post("/run/cancel", json={"session_id": 4242})
     assert resp.get_json()["cancelled"] is True
     assert runtime.is_cancelled(4242) is True
