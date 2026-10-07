@@ -1,0 +1,3242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Agent</title>
+    <script src="https://cdn.bootcdn.net/ajax/libs/marked/4.3.0/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+    <!-- highlight.js 代码高亮 -->
+    <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdn.bootcdn.net/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <style>
+        :root {
+            --bg-page: #f0f2f5;
+            --bg-app: #ffffff;
+            --bg-chat: #fafbfc;
+            --bg-bubble-ai: #ffffff;
+            --bg-bubble-user: linear-gradient(135deg, #667eea, #764ba2);
+            --bg-input: #ffffff;
+            --bg-code: #f0f2f5;
+            --bg-pre: #1e293b;
+            --bg-hover: #f3f4f6;
+            --text-main: #1f2937;
+            --text-user: #ffffff;
+            --text-code: #d63384;
+            --text-pre: #e2e8f0;
+            --text-sub: #9ca3af;
+            --border-main: #eef0f3;
+            --border-input: #e5e7eb;
+            --accent-gradient: linear-gradient(135deg, #667eea, #764ba2);
+        }
+
+        body.dark {
+            --bg-page: #0f172a;
+            --bg-app: #1e293b;
+            --bg-chat: #1a2332;
+            --bg-bubble-ai: #334155;
+            --bg-bubble-user: linear-gradient(135deg, #6366f1, #8b5cf6);
+            --bg-input: #334155;
+            --bg-code: #475569;
+            --bg-pre: #0f172a;
+            --bg-hover: #475569;
+            --text-main: #e2e8f0;
+            --text-user: #ffffff;
+            --text-code: #f472b6;
+            --text-pre: #e2e8f0;
+            --text-sub: #64748b;
+            --border-main: #334155;
+            --border-input: #475569;
+            --accent-gradient: linear-gradient(135deg, #6366f1, #8b5cf6);
+        }
+
+        /* diff 显示 */
+        .diff-view {
+            margin-top: 6px;
+            background: #1e293b;
+            border-radius: 8px;
+            padding: 8px 0;
+            font-family: "Consolas", "Monaco", monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            max-height: 400px;
+            overflow: auto;
+            white-space: pre;
+        }
+
+        .diff-view .diff-line {
+            display: block;
+            padding: 0 10px;
+            min-height: 18px;
+        }
+
+        .diff-view .diff-lineno {
+            display: inline-block;
+            width: 32px;
+            color: #64748b;
+            text-align: right;
+            margin-right: 8px;
+            user-select: none;
+            font-size: 11px;
+        }
+
+        .diff-view .diff-del {
+            background: rgba(239, 68, 68, 0.15);
+            color: #fca5a5;
+        }
+
+        .diff-view .diff-del .diff-lineno {
+            color: #ef4444;
+        }
+
+        .diff-view .diff-add {
+            background: rgba(34, 197, 94, 0.15);
+            color: #86efac;
+        }
+
+        .diff-view .diff-add .diff-lineno {
+            color: #22c55e;
+        }
+
+        .diff-view .diff-unchanged {
+            color: #94a3b8;
+        }
+
+        /* 删除确认按钮 */
+        .confirm-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+            padding: 8px 12px;
+            background: #fef3c7;
+            border: 1px solid #fcd34d;
+            border-radius: 8px;
+            align-items: center;
+        }
+
+        .confirm-actions .confirm-text {
+            flex: 1;
+            font-size: 12px;
+            color: #92400e;
+        }
+
+        .confirm-btn {
+            width: 32px;
+            height: 32px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .confirm-btn.yes {
+            background: #22c55e;
+            color: #fff;
+        }
+
+        .confirm-btn.yes:hover {
+            background: #16a34a;
+            box-shadow: 0 2px 8px rgba(34, 197, 94, 0.4);
+        }
+
+        .confirm-btn.no {
+            background: #ef4444;
+            color: #fff;
+        }
+
+        .confirm-btn.no:hover {
+            background: #dc2626;
+            box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+            background: var(--bg-page);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .app {
+            width: 100%;
+            max-width: 1100px;
+            height: 92vh;
+            background: var(--bg-app);
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .header {
+            padding: 16px 22px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+
+        .header h1 {
+            font-size: 17px;
+            font-weight: 600;
+        }
+
+        .header .sub {
+            font-size: 11px;
+            opacity: 0.85;
+            margin-top: 2px;
+        }
+
+        .main-body {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        /* 侧边栏 */
+        .sidebar {
+            width: 220px;
+            background: var(--bg-hover);
+            border-right: 1px solid #eef0f3;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+        }
+
+        .new-chat-btn {
+            margin: 12px;
+            padding: 9px 14px;
+            background: var(--accent-gradient);
+            color: #fff;
+            border: none;
+            border-radius: 9px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .session-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0 8px 10px;
+        }
+
+        .session-item {
+            padding: 8px 10px;
+            border-radius: 7px;
+            cursor: pointer;
+            font-size: 12px;
+            color: #1f2937;
+            margin-bottom: 3px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: background 0.15s;
+        }
+
+        .session-item:hover {
+            background: #eef0f3;
+        }
+
+        .session-item.active {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: #fff;
+        }
+
+        .session-title {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .session-delete {
+            background: transparent;
+            border: none;
+            color: inherit;
+            font-size: 13px;
+            cursor: pointer;
+            opacity: 0;
+        }
+
+        .session-item:hover .session-delete {
+            opacity: 0.7;
+        }
+
+        /* 右侧对话区 */
+        .chat-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .chat {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: var(--bg-chat);
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .msg {
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+        }
+
+        .msg.user {
+            flex-direction: row-reverse;
+        }
+
+        .bubble-wrap {
+            max-width: 88%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .msg.user .bubble-wrap {
+            align-items: flex-end;
+        }
+
+        .bubble {
+            padding: 11px 15px;
+            border-radius: 11px;
+            font-size: 14px;
+            line-height: 1.7;
+            word-break: break-word;
+        }
+
+        .msg.user .bubble {
+            background: var(--bg-bubble-user);
+            color: var(--text-user);
+            white-space: pre-wrap;
+        }
+
+        .msg.assistant .bubble {
+            background: var(--bg-bubble-ai);
+            border: 1px solid var(--border-main);
+            color: var(--text-main);
+        }
+
+        /* Markdown */
+        .bubble p {
+            margin: 6px 0;
+        }
+
+        .bubble h1,
+        .bubble h2,
+        .bubble h3 {
+            margin: 10px 0 6px;
+            font-weight: 600;
+        }
+
+        .bubble h1 {
+            font-size: 17px;
+        }
+
+        .bubble h2 {
+            font-size: 15px;
+        }
+
+        .bubble h3 {
+            font-size: 14px;
+        }
+
+        .bubble ul,
+        .bubble ol {
+            margin: 6px 0;
+            padding-left: 20px;
+        }
+
+        .bubble li {
+            margin: 3px 0;
+        }
+
+        .bubble code {
+            background: var(--bg-code);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: "Consolas", monospace;
+            font-size: 13px;
+            color: var(--text-code);
+        }
+
+        .bubble pre {
+            background: #1e293b !important;
+            color: #e2e8f0;
+            padding: 12px 14px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 10px 0;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .bubble pre code {
+            background: none !important;
+            color: inherit;
+            padding: 0;
+            font-size: 13px;
+            font-family: "Consolas", "Monaco", monospace;
+        }
+
+        .bubble table {
+            border-collapse: collapse;
+            margin: 8px 0;
+            font-size: 13px;
+        }
+
+        .bubble th,
+        .bubble td {
+            border: 1px solid #e5e7eb;
+            padding: 5px 10px;
+        }
+
+        .bubble th {
+            background: #f9fafb;
+            font-weight: 600;
+        }
+
+        /* 执行详情 */
+        .exec-details {
+            margin-top: 8px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            background: #f9fafb;
+            font-size: 12px;
+            overflow: hidden;
+        }
+
+        .exec-details>summary {
+            list-style: none;
+            cursor: pointer;
+            padding: 7px 11px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #4b5563;
+            font-weight: 500;
+            user-select: none;
+        }
+
+        .exec-details>summary:hover {
+            background: #f3f4f6;
+        }
+
+        .exec-details>summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .exec-details .arrow {
+            display: inline-block;
+            width: 0;
+            height: 0;
+            border-top: 5px solid transparent;
+            border-bottom: 5px solid transparent;
+            border-left: 8px solid #667eea;
+            transition: transform 0.2s;
+            flex-shrink: 0;
+        }
+
+        .exec-details[open] .arrow {
+            transform: rotate(90deg);
+        }
+
+        .exec-details .token-info {
+            margin-left: auto;
+            font-size: 11px;
+            color: #9ca3af;
+            font-family: "Consolas", monospace;
+            white-space: nowrap;
+        }
+
+        .exec-details .token-info .token-num {
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        .exec-list {
+            padding: 4px 11px 11px;
+            display: flex;
+            flex-direction: column;
+            gap: 9px;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        .exec-item {
+            padding-left: 9px;
+            border-left: 3px solid #667eea;
+        }
+
+        .exec-item .tool-call {
+            font-family: "Consolas", monospace;
+            color: #4c51bf;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .exec-item .tool-result {
+            background: #f0fdf4;
+            padding: 6px 8px;
+            border-radius: 4px;
+            font-family: "Consolas", monospace;
+            color: #166534;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            font-size: 11px;
+            line-height: 1.5;
+        }
+
+        .input-area {
+            padding: 14px 20px;
+            background: var(--bg-app);
+            border-top: 1px solid var(--border-main);
+            display: flex;
+            flex-wrap: wrap;
+            /* ← 允许图片预览独占一行 */
+            gap: 10px;
+            align-items: flex-end;
+            /* ← 底部对齐 */
+        }
+
+        /* ===== 模型选择器 ===== */
+        .model-picker {
+            position: relative;
+            display: inline-block;
+        }
+
+        #modelPickerBtn {
+            padding: 11px 14px;
+            background: var(--bg-input, #fff);
+            border: 2px solid var(--border-input, #e5e7eb);
+            border-radius: 10px;
+            font-size: 13px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+            margin-bottom: 2px;
+            /* ← 和输入框底部对齐 */
+            font-family: inherit;
+            /* 批次 4：模型名过长时截断显示 */
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        #modelPickerBtn #modelPickerLabel {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 150px;
+        }
+
+        #modelPickerBtn:hover {
+            border-color: #667eea;
+        }
+
+        #modelPickerBtn .arrow {
+            font-size: 10px;
+            color: #999;
+            margin-left: 2px;
+        }
+
+        .model-picker-dropdown {
+            display: none;
+            position: absolute;
+            bottom: calc(100% + 6px);
+            left: 0;
+            min-width: 280px;
+            max-height: 400px;
+            overflow-y: auto;
+            background: #fff;
+            border: 1px solid #e3e6ea;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+            z-index: 100;
+            padding: 6px 0;
+        }
+
+        .model-picker-dropdown.show {
+            display: block;
+        }
+
+        .provider-group {
+            padding: 4px 0;
+            border-bottom: 1px solid #f1f3f4;
+        }
+
+        .provider-group:last-child {
+            border-bottom: none;
+        }
+
+        .provider-header {
+            padding: 6px 14px;
+            font-size: 11px;
+            color: #999;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 600;
+        }
+
+        .provider-header .locked {
+            color: #f59e0b;
+            font-size: 10px;
+            font-weight: normal;
+        }
+
+        .model-item {
+            padding: 8px 14px 8px 28px;
+            font-size: 13px;
+            color: #333;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.1s;
+        }
+
+        .model-item:hover {
+            background: #f1f5ff;
+        }
+
+        .model-item.active {
+            background: #eef1ff;
+            color: #4a63e7;
+            font-weight: 500;
+        }
+
+        .model-item.disabled {
+            color: #bbb;
+            cursor: not-allowed;
+        }
+
+        .model-item.disabled:hover {
+            background: transparent;
+        }
+
+        .model-item .default-tag {
+            font-size: 10px;
+            color: #999;
+            background: #f3f4f6;
+            padding: 1px 6px;
+            border-radius: 4px;
+            margin-left: 8px;
+        }
+
+        /* ===== 多 Agent 三角色选择器 ===== */
+        .multi-agent-pickers {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            width: 100%;
+            padding: 0 0 8px;
+            border-bottom: 1px solid #eef0f3;
+            margin-bottom: 8px;
+        }
+
+        .role-picker {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .role-label {
+            font-size: 12px;
+            color: #6b7280;
+            white-space: nowrap;
+        }
+
+        .role-picker-btn {
+            padding: 6px 10px;
+            background: var(--bg-input, #fff);
+            border: 1.5px solid var(--border-input, #e5e7eb);
+            border-radius: 8px;
+            font-size: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            white-space: nowrap;
+            font-family: inherit;
+            max-width: 180px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .role-picker-btn:hover {
+            border-color: #667eea;
+        }
+
+        .role-picker-btn .arrow {
+            font-size: 9px;
+            color: #999;
+        }
+
+        .role-picker-dropdown {
+            display: none;
+            position: absolute;
+            bottom: calc(100% + 6px);
+            left: 0;
+            min-width: 240px;
+            max-height: 360px;
+            overflow-y: auto;
+            background: #fff;
+            border: 1px solid #e3e6ea;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+            z-index: 100;
+            padding: 6px 0;
+        }
+
+        .role-picker-dropdown.show {
+            display: block;
+        }
+
+        /* ===== 图片上传（多模态）===== */
+        #imgBtn {
+            padding: 11px 14px;
+            background: var(--bg-input);
+            border: 2px solid var(--border-input);
+            border-radius: 10px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-bottom: 2px;
+            /* ← 和输入框底部对齐 */
+        }
+
+        #imgBtn:hover {
+            border-color: #667eea;
+        }
+
+        .image-preview {
+            display: none;
+            width: 100%;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .img-thumb {
+            position: relative;
+            width: 64px;
+            height: 64px;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid var(--border-main);
+            background: var(--bg-input);
+        }
+
+        .img-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .img-thumb-del {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            width: 18px;
+            height: 18px;
+            line-height: 16px;
+            padding: 0;
+            border: none;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.6);
+            color: #fff;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        /* ===== 图片放大 Lightbox ===== */
+        #imgLightbox {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 9999;
+            justify-content: center;
+            align-items: center;
+            cursor: zoom-out;
+        }
+
+        #imgLightbox.show {
+            display: flex;
+        }
+
+        #imgLightbox img {
+            max-width: 92vw;
+            max-height: 92vh;
+            border-radius: 8px;
+            box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
+            object-fit: contain;
+        }
+
+        /* 让缩略图和气泡图片可点击 */
+        .img-thumb img,
+        .bubble-img {
+            cursor: zoom-in;
+        }
+
+        .bubble-images {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 6px;
+        }
+
+        .bubble-img {
+            max-width: 180px;
+            max-height: 180px;
+            border-radius: 8px;
+            display: block;
+        }
+
+        #task {
+            flex: 1;
+            padding: 11px 15px;
+            background: var(--bg-input);
+            border: 2px solid var(--border-input);
+            border-radius: 10px;
+            font-size: 14px;
+            font-family: inherit;
+            color: var(--text-main);
+            resize: vertical;
+            /* ← 允许垂直拖动 */
+            outline: none;
+            min-height: 90px;
+            /* ← 初始 3 行高 */
+            max-height: 300px;
+            /* ← 最大 300px */
+            line-height: 1.5;
+            /* ← 行高 */
+        }
+
+        #task:focus {
+            border-color: #667eea;
+        }
+
+        #runBtn {
+            padding: 11px 24px;
+            background: var(--accent-gradient);
+            color: var(--text-user);
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-bottom: 2px;
+            /* ← 和输入框底部对齐 */
+        }
+
+        #runBtn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        /* 任务计划面板 */
+        .plan-panel {
+            background: #fff8e1;
+            border-bottom: 1px solid #fcd34d;
+            padding: 10px 16px;
+            flex-shrink: 0;
+            font-size: 13px;
+        }
+
+        body.dark .plan-panel {
+            background: #3a2f0b;
+            border-bottom-color: #a16207;
+        }
+
+        .plan-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 600;
+            color: #92400e;
+            margin-bottom: 6px;
+        }
+
+        body.dark .plan-header {
+            color: #fcd34d;
+        }
+
+        .plan-toggle {
+            background: transparent;
+            border: none;
+            color: inherit;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .plan-list {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .plan-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 2px 0;
+            color: #78350f;
+        }
+
+        body.dark .plan-item {
+            color: #e2e8f0;
+        }
+
+        .plan-item .plan-icon {
+            width: 16px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .plan-item.done .plan-text {
+            text-decoration: line-through;
+            opacity: 0.6;
+        }
+
+        .plan-item.doing .plan-text {
+            font-weight: 600;
+            color: #b45309;
+        }
+
+        body.dark .plan-item.doing .plan-text {
+            color: #fbbf24;
+        }
+
+        .plan-item.failed .plan-text {
+            color: #b91c1c;
+        }
+
+        .icon-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: #fff;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 15px;
+            cursor: pointer;
+        }
+
+
+        .icon-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        /* 文档区 */
+        .doc-section {
+            border-top: 1px solid var(--border-main);
+            padding: 10px;
+            flex-shrink: 0;
+            max-height: 240px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* 项目树 */
+        .project-tree-panel {
+            width: 220px;
+            background: #f9fafb;
+            border-right: 1px solid #eef0f3;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            overflow: hidden;
+        }
+
+        .project-tree-panel.collapsed {
+            width: 40px;
+        }
+
+        .project-tree-panel.collapsed .pt-title {
+            display: none;
+        }
+
+        .project-tree-panel.collapsed .project-tree {
+            display: none;
+        }
+
+        .project-tree-panel.collapsed .project-tree-header {
+            padding: 10px 4px;
+            justify-content: center;
+        }
+
+        .project-tree-panel.collapsed .project-tree-header>div {
+            flex-direction: column;
+        }
+
+        .project-tree-panel {
+            transition: width 0.2s ease;
+        }
+
+        .project-tree-header {
+            padding: 10px 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #6b7280;
+            font-weight: 600;
+            border-bottom: 1px solid #eef0f3;
+            flex-shrink: 0;
+        }
+
+        .project-tree {
+            flex: 1;
+            overflow-y: auto;
+            padding: 6px 0;
+            font-size: 12px;
+            font-family: "Consolas", monospace;
+        }
+
+        .tree-item {
+            padding: 2px 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .tree-item:hover {
+            background: #f3f4f6;
+        }
+
+        .tree-item.file {
+            color: #4b5563;
+        }
+
+        .tree-item.dir {
+            color: #1f2937;
+            font-weight: 500;
+        }
+
+        .tree-item .icon {
+            font-size: 13px;
+        }
+
+        .tree-item.selected {
+            background: #e0e7ff;
+        }
+
+        .tree-children {
+            padding-left: 12px;
+        }
+
+        .doc-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 6px 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-sub);
+        }
+
+        .icon-btn-mini {
+            background: transparent;
+            border: none;
+            color: var(--accent-gradient);
+            font-size: 18px;
+            cursor: pointer;
+            padding: 0 6px;
+            border-radius: 6px;
+            line-height: 1;
+        }
+
+        .icon-btn-mini:hover {
+            background: var(--bg-hover);
+        }
+
+        .doc-list {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .doc-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 8px;
+            border-radius: 6px;
+            font-size: 12px;
+            color: var(--text-main);
+            background: var(--bg-hover);
+            gap: 6px;
+        }
+
+        .doc-item:hover {
+            background: var(--bg-code);
+        }
+
+        .doc-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .doc-chunks {
+            font-size: 11px;
+            color: var(--text-sub);
+            flex-shrink: 0;
+        }
+
+        .doc-delete {
+            background: transparent;
+            border: none;
+            color: var(--text-sub);
+            font-size: 14px;
+            cursor: pointer;
+            padding: 0 2px;
+            flex-shrink: 0;
+        }
+
+        .doc-delete:hover {
+            color: #ef4444;
+        }
+
+        .doc-empty {
+            font-size: 12px;
+            color: var(--text-sub);
+            padding: 6px 8px;
+            text-align: center;
+        }
+
+        /* 模式切换 */
+        .mode-switch {
+            display: flex;
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 8px;
+            padding: 2px;
+        }
+
+        .mode-btn {
+            background: transparent;
+            border: none;
+            color: #fff;
+            padding: 5px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+            opacity: 0.7;
+        }
+
+        .mode-btn.active {
+            background: rgba(255, 255, 255, 0.9);
+            color: #667eea;
+            opacity: 1;
+            font-weight: 600;
+        }
+
+        .mode-btn:hover:not(.active) {
+            background: rgba(255, 255, 255, 0.1);
+            opacity: 1;
+        }
+
+        /* 多 Agent 阶段卡片 */
+        .phase-card {
+            margin: 10px 0;
+            border-radius: 10px;
+            overflow: hidden;
+            border: 1px solid var(--border-main);
+            background: var(--bg-app);
+        }
+
+        .phase-header {
+            padding: 8px 12px;
+            font-size: 13px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #fff;
+        }
+
+        .phase-header.planner {
+            background: linear-gradient(135deg, #8b5cf6, #6366f1);
+        }
+
+        .phase-header.executor {
+            background: linear-gradient(135deg, #3b82f6, #06b6d4);
+        }
+
+        .phase-header.reviewer {
+            background: linear-gradient(135deg, #f59e0b, #ef4444);
+        }
+
+        .phase-header .phase-status {
+            margin-left: auto;
+            font-size: 11px;
+            opacity: 0.8;
+            font-weight: 400;
+        }
+
+        .phase-body {
+            padding: 10px 14px;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        /* Planner 计划列表 */
+        .planner-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .planner-step {
+            padding: 4px 0;
+            color: var(--text-main);
+        }
+
+        .planner-step::before {
+            content: "▸ ";
+            color: #8b5cf6;
+            font-weight: 700;
+        }
+
+        /* Reviewer 结果 */
+        .review-passed {
+            color: #22c55e;
+            font-weight: 600;
+        }
+
+        .review-failed {
+            color: #ef4444;
+            font-weight: 600;
+        }
+
+        .review-unknown {
+            color: #f59e0b;
+            font-weight: 600;
+        }
+
+        .review-reason {
+            margin-top: 6px;
+            color: var(--text-main);
+            font-size: 12px;
+        }
+
+        .review-suggestions {
+            margin-top: 8px;
+            padding-left: 16px;
+            color: var(--text-sub);
+            font-size: 12px;
+        }
+
+        .review-suggestions li {
+            margin: 2px 0;
+        }
+
+        .meta-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 0 4px;
+        }
+
+        .dropdown {
+            position: relative;
+            display: inline-block;
+        }
+
+        .dropdown-menu {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            margin-top: 4px;
+            background: var(--bg-app);
+            border: 1px solid var(--border-main);
+            border-radius: 8px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+            z-index: 100;
+            min-width: 200px;
+            padding: 4px;
+        }
+
+        .dropdown-menu a {
+            display: block;
+            padding: 8px 12px;
+            font-size: 13px;
+            color: var(--text-main);
+            cursor: pointer;
+            border-radius: 6px;
+            text-decoration: none;
+        }
+
+        .dropdown-menu a:hover {
+            background: var(--bg-hover);
+        }
+
+        .msg-action-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-sub);
+            font-size: 12px;
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+
+        .msg-action-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-main);
+        }
+
+        /* 搜索框 */
+        .search-box {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: var(--bg-app);
+            border: 1px solid var(--border-main);
+            border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            z-index: 999;
+            min-width: 320px;
+        }
+
+        #searchInput {
+            flex: 1;
+            padding: 6px 10px;
+            border: 1px solid var(--border-input);
+            border-radius: 6px;
+            background: var(--bg-input);
+            color: var(--text-main);
+            font-size: 13px;
+            outline: none;
+        }
+
+        #searchInput:focus {
+            border-color: #667eea;
+        }
+
+        .search-count {
+            font-size: 12px;
+            color: var(--text-sub);
+            white-space: nowrap;
+        }
+
+        .search-close {
+            background: transparent;
+            border: none;
+            color: var(--text-sub);
+            cursor: pointer;
+            font-size: 14px;
+            padding: 4px 6px;
+            border-radius: 4px;
+        }
+
+        .search-close:hover {
+            background: var(--bg-hover);
+            color: var(--text-main);
+        }
+
+        /* 匹配高亮 */
+        .msg.search-match .bubble {
+            background: #fef3c7 !important;
+            color: #78350f !important;
+            border-color: #fcd34d !important;
+        }
+
+        .msg.search-active .bubble {
+            background: #fbbf24 !important;
+            color: #78350f !important;
+            border-color: #f59e0b !important;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app">
+        <div class="header">
+            <div>
+                <h1>🤖 AI Agent</h1>
+                <div class="sub">读、写、执行、规划、RAG、记忆 · 多 Agent 协作</div>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <div class="mode-switch">
+                    <button class="mode-btn active" data-mode="single" onclick="setMode('single')">单 Agent</button>
+                    <button class="mode-btn" data-mode="multi" onclick="setMode('multi')">多 Agent</button>
+                </div>
+                <button class="icon-btn" id="themeBtn" onclick="toggleTheme()" title="切换主题">🌙</button>
+                <div class="dropdown">
+                    <button class="icon-btn" onclick="toggleExportMenu(event)" title="导出">📥</button>
+                    <div class="dropdown-menu" id="exportMenu" style="display:none;">
+                        <a onclick="exportAs('md')">📄 Markdown (.md)</a>
+                        <a onclick="exportAs('json')">📋 JSON (.json)</a>
+                        <a onclick="exportAs('pdf')">📕 PDF (.pdf)</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="main-body">
+            <div class="sidebar">
+                <button class="new-chat-btn" onclick="createNewSession()">+ 新对话</button>
+                <div class="session-list" id="sessionList"></div>
+
+                <!-- 文档区 -->
+                <div class="doc-section">
+                    <div class="doc-header">
+                        <span>📚 知识库</span>
+                        <button class="icon-btn-mini" onclick="triggerUpload()" title="上传文档">+</button>
+                    </div>
+                    <div class="doc-list" id="docList"></div>
+                    <input type="file" id="fileInput" accept=".txt,.md,.pdf,.docx" style="display: none;"
+                        onchange="handleFileUpload(event)">
+                </div>
+            </div>
+            <!-- 搜索框 -->
+            <div class="search-box" id="searchBox" style="display:none;">
+                <input type="text" id="searchInput" placeholder="搜索对话（Enter 下一个，Esc 关闭）" autocomplete="off">
+                <span class="search-count" id="searchCount"></span>
+                <button class="search-close" onclick="closeSearch()">✕</button>
+            </div>
+
+            <!-- 项目树栏 -->
+            <div class="project-tree-panel" id="projectTreePanel">
+                <div class="project-tree-header">
+                    <span class="pt-title">📁 项目树</span>
+                    <div style="display: flex; gap: 4px;">
+                        <button onclick="loadProjectTree()" class="icon-btn-mini" title="刷新">🔄</button>
+                        <button onclick="toggleProjectTree()" class="icon-btn-mini" id="ptToggleBtn"
+                            title="折叠/展开">◀</button>
+                    </div>
+                </div>
+                <div class="project-tree" id="projectTree"></div>
+            </div>
+
+            <div class="chat-panel">
+                <!-- 任务计划面板 -->
+                <div class="plan-panel" id="planPanel" style="display: none;">
+                    <div class="plan-header">
+                        <span>📋 任务计划</span>
+                        <button class="plan-toggle" onclick="togglePlan()">收起</button>
+                    </div>
+                    <div class="plan-list" id="planList"></div>
+                </div>
+                <div class="chat" id="chat">
+                    <div class="msg assistant">
+                        <div class="bubble-wrap">
+                            <div class="bubble">👋 你好！我可以帮你分析代码。试试说：<br>「读一下 tools.py，总结它有哪些函数」<br>「列出项目根目录的所有文件」<br>💡
+                                提示：可以让我读取、修改任何项目代码</div>
+                        </div>
+                    </div>
+                </div>
+                <div
+                    style="padding: 6px 16px; background: #f9fafb; border-top: 1px solid #eef0f3; display: flex; align-items: center; gap: 8px; font-size: 12px;">
+                    <span style="color: #6b7280; white-space: nowrap;">📁 当前项目：</span>
+                    <input type="text" id="projectRootInput" placeholder="/home/pz/PycharmProjects/your-project"
+                        style="flex: 1; padding: 4px 8px; border: 1px solid #e5e7eb; border-radius: 4px; font-size: 12px; font-family: monospace;"
+                        autocomplete="off">
+                    <button onclick="selectProjectFolder()"
+                        style="padding: 4px 10px; background: #10b981; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer;">📂
+                        选择</button>
+                    <button onclick="saveProjectRoot()"
+                        style="padding: 4px 10px; background: #667eea; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer;">应用</button>
+                </div>
+                <div class="input-area">
+                    <div class="image-preview" id="imagePreview"></div>
+                    <input type="file" id="imageInput" accept="image/*" multiple style="display: none;"
+                        onchange="handleImageFiles(this.files)">
+                    <button type="button" id="imgBtn" onclick="document.getElementById('imageInput').click()"
+                        title="上传图片（也可在输入框内 Ctrl+V 直接粘贴图片）">🖼️</button>
+                    <div class="multi-agent-pickers" id="multiAgentPickers" style="display: none;">
+                        <div class="role-picker" id="plannerPicker">
+                            <span class="role-label">📋 规划</span>
+                            <button type="button" class="role-picker-btn" id="plannerPickerBtn" onclick="toggleRolePicker('planner', event)">
+                                <span id="plannerPickerIcon">🐳</span>
+                                <span id="plannerPickerLabel">DeepSeek · deepseek-flash</span>
+                                <span class="arrow">▾</span>
+                            </button>
+                            <div class="role-picker-dropdown" id="plannerPickerDropdown"></div>
+                        </div>
+                        <div class="role-picker" id="executorPicker">
+                            <span class="role-label">⚙️ 执行</span>
+                            <button type="button" class="role-picker-btn" id="executorPickerBtn" onclick="toggleRolePicker('executor', event)">
+                                <span id="executorPickerIcon">🐳</span>
+                                <span id="executorPickerLabel">DeepSeek · deepseek-flash</span>
+                                <span class="arrow">▾</span>
+                            </button>
+                            <div class="role-picker-dropdown" id="executorPickerDropdown"></div>
+                        </div>
+                        <div class="role-picker" id="reviewerPicker">
+                            <span class="role-label">🔍 审查</span>
+                            <button type="button" class="role-picker-btn" id="reviewerPickerBtn" onclick="toggleRolePicker('reviewer', event)">
+                                <span id="reviewerPickerIcon">🐳</span>
+                                <span id="reviewerPickerLabel">DeepSeek · deepseek-flash</span>
+                                <span class="arrow">▾</span>
+                            </button>
+                            <div class="role-picker-dropdown" id="reviewerPickerDropdown"></div>
+                        </div>
+                    </div>
+                    <div class="model-picker" id="modelPicker">
+                        <button type="button" id="modelPickerBtn" onclick="toggleModelPicker(event)">
+                            <span id="modelPickerIcon">🐳</span>
+                            <span id="modelPickerLabel">DeepSeek · deepseek-chat</span>
+                            <span class="arrow">▾</span>
+                        </button>
+                        <div class="model-picker-dropdown" id="modelPickerDropdown"></div>
+                    </div>
+                    <textarea id="task" placeholder="..."></textarea>
+                    <button id="runBtn" onclick="runTask()">执行</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        // 批次 5：清理旧的 apiSettings（批次 4 前的设置弹窗残留）
+        try {
+            if (localStorage.getItem("apiSettings")) {
+                localStorage.removeItem("apiSettings");
+                console.log("[Cleanup] 已移除旧的 apiSettings");
+            }
+        } catch (e) {
+            // localStorage 不可用时忽略
+        }
+
+        let multiAgentMode = false;
+        const chat = document.getElementById("chat");
+        let currentSessionId = null;
+
+        // 每个会话的运行状态：{ sessionId: { status: "running"|"done", fullText, plan, ctx } }
+        // fullText：本会话后台任务已接收的文本（切回时用它重绘气泡）
+        // ctx：后台任务的渲染上下文，切回时通过 Object.assign 重新指向新的 DOM
+        const sessionStates = {};
+
+        function showWriteConfirm(ctx, path, oldContent, newContent) {
+            ctx.pendingWriteContent = newContent;
+            const existing = ctx.bubble.parentElement.querySelector(".confirm-actions");
+            if (existing) existing.remove();
+
+            // 生成简单的 diff
+            const diffHtml = generateDiff(oldContent, newContent);
+
+            const div = document.createElement("div");
+            div.className = "confirm-actions";
+            div.style.flexDirection = "column";
+            div.style.alignItems = "stretch";
+            div.innerHTML = `
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span class="confirm-text" style="flex:1;">✍️ 确认写入 <b>${escapeHtml(path)}</b>？</span>
+                    <button class="confirm-btn yes" title="确认写入">✓</button>
+                    <button class="confirm-btn no" title="取消">✗</button>
+                </div>
+                <div class="diff-view">${diffHtml}</div>
+            `;
+
+            div.querySelector(".confirm-btn.yes").addEventListener("click", () => {
+                div.remove();
+                // 用户确认后：续跑 Agent（复用 pending state，从原 step 继续）
+                resumeRun(ctx);
+            });
+
+            div.querySelector(".confirm-btn.no").addEventListener("click", () => {
+                div.remove();
+                const cancelMsg = document.createElement("div");
+                cancelMsg.className = "bubble";
+                cancelMsg.style.background = "#f3f4f6";
+                cancelMsg.style.color = "#6b7280";
+                cancelMsg.style.marginTop = "6px";
+                cancelMsg.textContent = "❌ 已取消写入";
+                ctx.bubble.parentElement.appendChild(cancelMsg);
+            });
+
+            ctx.bubble.parentElement.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        function generateDiff(oldText, newText) {
+            const oldLines = oldText.split("\n");
+            const newLines = newText.split("\n");
+
+            // 简易 LCS diff：找出最长公共子序列，标记增删
+            const m = oldLines.length;
+            const n = newLines.length;
+
+            // DP 表
+            const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+            for (let i = 1; i <= m; i++) {
+                for (let j = 1; j <= n; j++) {
+                    if (oldLines[i - 1] === newLines[j - 1]) {
+                        dp[i][j] = dp[i - 1][j - 1] + 1;
+                    } else {
+                        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+                    }
+                }
+            }
+
+            // 回溯生成 diff
+            const result = [];
+            let i = m, j = n;
+            while (i > 0 || j > 0) {
+                if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
+                    result.unshift({ type: "same", oldLine: i, newLine: j, text: oldLines[i - 1] });
+                    i--;
+                    j--;
+                } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+                    result.unshift({ type: "add", newLine: j, text: newLines[j - 1] });
+                    j--;
+                } else if (i > 0) {
+                    result.unshift({ type: "del", oldLine: i, text: oldLines[i - 1] });
+                    i--;
+                }
+            }
+
+            // 转成 HTML
+            let html = "";
+            for (const item of result) {
+                if (item.type === "same") {
+                    html += `<span class="diff-line diff-unchanged">` +
+                        `<span class="diff-lineno">${item.oldLine}</span>` +
+                        `<span class="diff-lineno">${item.newLine}</span>` +
+                        `  ${escapeHtml(item.text)}</span>`;
+                } else if (item.type === "del") {
+                    html += `<span class="diff-line diff-del">` +
+                        `<span class="diff-lineno">${item.oldLine}</span>` +
+                        `<span class="diff-lineno"></span>` +
+                        `- ${escapeHtml(item.text)}</span>`;
+                } else if (item.type === "add") {
+                    html += `<span class="diff-line diff-add">` +
+                        `<span class="diff-lineno"></span>` +
+                        `<span class="diff-lineno">${item.newLine}</span>` +
+                        `+ ${escapeHtml(item.text)}</span>`;
+                }
+            }
+
+            return html || '<span class="diff-unchanged">（无变化）</span>';
+        }
+
+        // ============ 确认后续跑 Agent ============
+        // 用户点 ✓ 后调用：带 resume:true 重新请求 /run，复用后端 pending state，
+        // 执行被确认的工具，并从原 step 继续跑完剩余步骤（含链式确认）。
+        async function resumeRun(ctx) {
+            const sessionId = (ctx.sessionId != null) ? ctx.sessionId : currentSessionId;
+            const isActive = () => (currentSessionId === sessionId);
+            const btn = document.getElementById("runBtn");
+            if (isActive()) {
+                btn.disabled = true;
+                btn.textContent = "继续中...";
+            }
+
+            if (!sessionStates[sessionId]) sessionStates[sessionId] = {};
+            const st = sessionStates[sessionId];
+            st.status = "running";
+
+            let fullText = st.fullText || "";
+            let lastResultEl = null;
+
+            try {
+                const body = {
+                    task: "",
+                    session_id: sessionId,
+                    resume: true,   // 关键：让后端从 pending state 续跑，而不是重新开始
+                    // 用 Executor 的 provider / model，保持与中断时一致
+                    provider_id: (multiAgentMode ? (roleSelection.executor.providerId || currentProviderId) : currentProviderId) || null,
+                    model: (multiAgentMode ? (roleSelection.executor.model || currentModelName) : currentModelName) || null,
+                    project_root: localStorage.getItem("projectRoot") || null,
+                };
+                if (multiAgentMode) {
+                    // 续跑时三角色的 provider / model 都要与中断前一致
+                    body.planner_provider_id = roleSelection.planner.providerId || currentProviderId;
+                    body.reviewer_provider_id = roleSelection.reviewer.providerId || currentProviderId;
+                    body.planner_model = roleSelection.planner.model;
+                    body.executor_model = roleSelection.executor.model;
+                    body.reviewer_model = roleSelection.reviewer.model;
+                }
+
+                // 多 Agent 模式续跑打 /run_multi（保留 Planner 上下文），否则打单 Agent /run
+                const url = multiAgentMode ? "/run_multi" : "/run";
+                const res = await fetch(url, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body)
+                });
+
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder("utf-8");
+                let buffer = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const parts = buffer.split("\n\n");
+                    buffer = parts.pop();
+                    for (const part of parts) {
+                        if (!part.startsWith("data: ")) continue;
+                        const data = part.slice(6).trim();
+                        try {
+                            const ev = JSON.parse(data);
+                            if (!st.execHistory) st.execHistory = [];
+                            if (ev.type === "text") {
+                                fullText += ev.content;
+                                st.fullText = fullText;
+                            } else if (ev.type === "plan_update") {
+                                st.plan = ev.plan;
+                            } else if (ev.type === "tool_call" || ev.type === "tool_result") {
+                                st.execHistory.push(ev);
+                            }
+
+                            // 未停留本会话：只存内存，切回时补渲染
+                            if (!isActive()) {
+                                if (ev.type === "confirm_write" || ev.type === "confirm_delete" || ev.type === "confirm_command") {
+                                    st.pendingConfirm = ev;
+                                }
+                                continue;
+                            }
+
+                            if (ev.type === "text") {
+                                ctx.bubble.innerHTML = DOMPurify.sanitize(marked.parse(fullText));
+                                chat.scrollTop = chat.scrollHeight;
+                            } else if (ev.type === "token_usage") {
+                                ctx.tokenInfo.innerHTML =
+                                    `⚡ <span class="token-num">${ev.total_tokens}</span> tokens ` +
+                                    `(输入 ${ev.prompt_tokens} · 输出 ${ev.completion_tokens} · ${ev.steps} 步)`;
+                                ctx.details.style.display = "block";
+                            } else if (ev.type === "tool_call") {
+                                lastResultEl = appendToolCall(ctx, ev.name, ev.args);
+                            } else if (ev.type === "tool_result") {
+                                if (lastResultEl) {
+                                    updateToolResult(lastResultEl, ev.content);
+                                } else {
+                                    // 续跑时后端只回 tool_result（tool_call 上一轮已渲染）
+                                    const items = ctx.execList.querySelectorAll(".tool-result");
+                                    if (items.length > 0) {
+                                        items[items.length - 1].textContent = "📋 " + ev.content;
+                                    }
+                                }
+                            } else if (ev.type === "confirm_delete") {
+                                showDeleteConfirm(ctx, ev.path, "");
+                            } else if (ev.type === "confirm_write") {
+                                showWriteConfirm(ctx, ev.path, ev.old_content, ev.new_content);
+                            } else if (ev.type === "confirm_command") {
+                                showCommandConfirm(ctx, ev.cmd);
+                            } else if (ev.type === "plan_update") {
+                                renderPlan(ev.plan);
+                            } else if (ev.type === "error") {
+                                ctx.bubble.style.color = "#b91c1c";
+                                ctx.bubble.textContent = "⚠️ " + ev.content;
+                            } else if (ev.type === "done") {
+                                ctx.details.open = false;
+                            }
+                        } catch (e) { }
+                    }
+                }
+
+                if (isActive()) {
+                    ctx.bubble.innerHTML = DOMPurify.sanitize(marked.parse(fullText));
+                    ctx.bubble.querySelectorAll('pre code').forEach(block => {
+                        hljs.highlightElement(block);
+                    });
+                }
+                await loadSessions();
+            } catch (err) {
+                if (isActive()) alert("继续请求失败：" + err.message);
+            } finally {
+                st.status = "done";
+                if (st.hintEl) { st.hintEl.remove(); st.hintEl = null; }
+                loadSessions();
+                if (isActive()) {
+                    btn.disabled = false;
+                    btn.textContent = "执行";
+                    const input = document.getElementById("task");
+                    if (input) input.focus();
+                }
+            }
+        }
+
+        function showDeleteConfirm(ctx, path, originalTask) {
+            // 移除已有的确认框
+            const existing = ctx.bubble.parentElement.querySelector(".confirm-actions");
+            if (existing) existing.remove();
+
+            const div = document.createElement("div");
+            div.className = "confirm-actions";
+            div.innerHTML = `
+                <span class="confirm-text">🗑 确认删除 <b>${escapeHtml(path)}</b>？</span>
+                <button class="confirm-btn yes" title="确认删除">✓</button>
+                <button class="confirm-btn no" title="取消">✗</button>
+            `;
+
+            div.querySelector(".confirm-btn.yes").addEventListener("click", () => {
+                div.remove();
+                // 用户确认后：续跑 Agent（复用 pending state，从原 step 继续）
+                resumeRun(ctx);
+            });
+
+            div.querySelector(".confirm-btn.no").addEventListener("click", () => {
+                div.remove();
+                // 显示取消提示
+                const cancelMsg = document.createElement("div");
+                cancelMsg.className = "bubble";
+                cancelMsg.style.background = "#f3f4f6";
+                cancelMsg.style.color = "#6b7280";
+                cancelMsg.style.marginTop = "6px";
+                cancelMsg.textContent = "❌ 已取消删除";
+                ctx.bubble.parentElement.appendChild(cancelMsg);
+            });
+
+            ctx.bubble.parentElement.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        function escapeHtml(s) {
+            return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        }
+
+        function addUserMessage(text, time, images) {
+            const div = document.createElement("div");
+            div.className = "msg user";
+            const timeStr = time || nowTime();
+            const hasImgs = images && images.length;
+            const bubbleHtml = hasImgs
+                ? (`<div class="bubble-images">` +
+                    images.map(src => `<img class="bubble-img" src="${src}" alt="图片" onclick="openLightbox('${src}')">`).join("") +
+                    `</div>` + (text ? escapeHtml(text) : ""))
+                : escapeHtml(text);
+            div.innerHTML = `
+                <div class="bubble-wrap">
+                    <div class="bubble">${bubbleHtml}</div>
+                    <div class="meta-row">
+                        <span class="time">${timeStr}</span>
+                        <button class="msg-action-btn" title="编辑" onclick="editMessage(this)">✏️</button>
+                        <button class="msg-action-btn" title="重新生成" onclick="regenerate(this)">🔄</button>
+                    </div>
+                </div>
+            `;
+            // 存原始文本
+            div.dataset.rawText = text;
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        function addAssistantMessage(time) {
+            const div = document.createElement("div");
+            const timeStr = time || nowTime();
+            div.className = "msg assistant";
+            div.innerHTML = `
+                <div class="bubble-wrap">
+                    <div class="bubble"></div>
+                    <div class="meta-row">
+                        <span class="time">${timeStr}</span>
+                        <button class="msg-action-btn" title="复制" onclick="copyMessage(this)">📋</button>
+                        <button class="msg-action-btn" title="重新生成" onclick="regenerate(this)">🔄</button>
+                    </div>
+                    <details class="exec-details" style="display: none;">
+                        <summary>
+                            <span class="arrow"></span>
+                            <span class="exec-title">执行详情</span>
+                            <span class="token-info"></span>
+                        </summary>
+                        <div class="exec-list"></div>
+                    </details>
+                </div>
+            `;
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+            return {
+                div: div,
+                bubble: div.querySelector(".bubble"),
+                details: div.querySelector(".exec-details"),
+                execList: div.querySelector(".exec-list"),
+                execTitle: div.querySelector(".exec-title"),
+                tokenInfo: div.querySelector(".token-info"),
+            };
+        }
+
+        function appendToolCall(ctx, toolName, toolArgs) {
+            ctx.details.style.display = "block";
+            const count = ctx.execList.children.length + 1;
+            ctx.execTitle.textContent = `执行详情（${count} 个工具调用）`;
+            const item = document.createElement("div");
+            item.className = "exec-item";
+            item.innerHTML = `
+                <div class="tool-call">🔧 ${escapeHtml(toolName)}(${escapeHtml(JSON.stringify(toolArgs))})</div>
+                <div class="tool-result">⏳ 执行中...</div>
+            `;
+            ctx.execList.appendChild(item);
+            chat.scrollTop = chat.scrollHeight;
+            return item.querySelector(".tool-result");
+        }
+
+        function updateToolResult(resultEl, content) {
+            resultEl.textContent = "📋 " + content;
+        }
+
+        // 从数据库恢复一条 AI 消息
+        function restoreAssistantMessage(raw, time) {
+            // 尝试解析 JSON（含 answer + tools）
+            let answer = raw;
+            let tools = [];
+            try {
+                const obj = JSON.parse(raw);
+                if (obj.answer !== undefined) {
+                    answer = obj.answer;
+                    tools = obj.tools || [];
+                    tokens = obj.tokens || null;
+                }
+            } catch (e) { }
+
+            const ctx = addAssistantMessage(time);
+            ctx.bubble.innerHTML = DOMPurify.sanitize(marked.parse(answer || ""));
+            // 高亮代码块
+            ctx.bubble.querySelectorAll('pre code').forEach(block => {
+                if (!block.dataset.highlighted) {
+                    hljs.highlightElement(block);
+                    block.dataset.highlighted = "yes";
+                }
+            });
+
+            if (tools.length > 0) {
+                ctx.details.style.display = "block";
+                let count = 0;
+                let lastResultEl = null;
+                tools.forEach(t => {
+                    if (t.type === "tool_call") {
+                        count++;
+                        ctx.execTitle.textContent = `执行详情（${count} 个工具调用）`;
+                        const item = document.createElement("div");
+                        item.className = "exec-item";
+                        item.innerHTML = `
+                            <div class="tool-call">🔧 ${escapeHtml(t.name)}(${escapeHtml(JSON.stringify(t.args))})</div>
+                            <div class="tool-result">⏳ 执行中...</div>
+                        `;
+                        ctx.execList.appendChild(item);
+                        lastResultEl = item.querySelector(".tool-result");
+                    } else if (t.type === "tool_result" && lastResultEl) {
+                        lastResultEl.textContent = "📋 " + t.content;
+                    }
+                });
+            }
+            // ✅ 恢复 token 用量
+            if (tokens) {
+                ctx.details.style.display = "block";
+                ctx.tokenInfo.innerHTML =
+                    `⚡ <span class="token-num">${tokens.total_tokens}</span> tokens ` +
+                    `(输入 ${tokens.prompt_tokens} · 输出 ${tokens.completion_tokens} · ${tokens.steps} 步)`;
+            }
+        }
+        // ============ 会话管理 ============
+        async function loadSessions() {
+            try {
+                const res = await fetch("/sessions");
+                const sessions = await res.json();
+                renderSessionList(sessions);
+
+                if (!currentSessionId) {
+                    if (sessions.length > 0) {
+                        switchSession(sessions[0].id);
+                    } else {
+                        await createNewSession();
+                    }
+                } else {
+                    highlightSession(currentSessionId);
+                }
+            } catch (e) {
+                console.error("加载会话失败", e);
+            }
+        }
+        // ===== 对话搜索 =====
+        let searchMatches = [];
+        let searchIndex = -1;
+
+        function openSearch() {
+            document.getElementById("searchBox").style.display = "flex";
+            document.getElementById("searchInput").focus();
+        }
+
+        function closeSearch() {
+            document.getElementById("searchBox").style.display = "none";
+            document.getElementById("searchInput").value = "";
+            clearSearchHighlights();
+            searchMatches = [];
+            searchIndex = -1;
+            document.getElementById("searchCount").textContent = "";
+        }
+
+        function clearSearchHighlights() {
+            document.querySelectorAll(".msg.search-match, .msg.search-active").forEach(el => {
+                el.classList.remove("search-match", "search-active");
+            });
+        }
+
+        function performSearch(keyword) {
+            clearSearchHighlights();
+            searchMatches = [];
+            searchIndex = -1;
+
+            if (!keyword || !keyword.trim()) {
+                document.getElementById("searchCount").textContent = "";
+                return;
+            }
+
+            const kw = keyword.toLowerCase();
+            document.querySelectorAll(".msg").forEach(msg => {
+                const text = msg.innerText.toLowerCase();
+                if (text.includes(kw)) {
+                    msg.classList.add("search-match");
+                    searchMatches.push(msg);
+                }
+            });
+
+            if (searchMatches.length > 0) {
+                searchIndex = 0;
+                searchMatches[0].classList.add("search-active");
+                searchMatches[0].scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+
+            document.getElementById("searchCount").textContent =
+                `${searchMatches.length} 条匹配`;
+        }
+
+        function nextMatch() {
+            if (searchMatches.length === 0) return;
+            searchMatches[searchIndex].classList.remove("search-active");
+            searchIndex = (searchIndex + 1) % searchMatches.length;
+            searchMatches[searchIndex].classList.add("search-active");
+            searchMatches[searchIndex].scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+
+        // 绑定事件
+        document.addEventListener("DOMContentLoaded", () => {
+            const input = document.getElementById("searchInput");
+            if (input) {
+                input.addEventListener("input", (e) => performSearch(e.target.value));
+                input.addEventListener("keydown", (e) => {
+                    if (e.key === "Enter") {
+                        e.preventDefault();
+                        nextMatch();
+                    } else if (e.key === "Escape") {
+                        closeSearch();
+                    }
+                });
+            }
+            loadProjectRoot();
+            loadProjectTree();
+            restoreProjectTreeState();
+        });
+
+        // 全局快捷键 Ctrl+F
+        document.addEventListener("keydown", (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+                e.preventDefault();
+                openSearch();
+            }
+            if (e.key === "Escape") {
+                const box = document.getElementById("searchBox");
+                if (box && box.style.display !== "none") {
+                    closeSearch();
+                }
+            }
+        });
+
+        function renderSessionList(sessions) {
+            const list = document.getElementById("sessionList");
+            list.innerHTML = "";
+            sessions.forEach(s => {
+                const div = document.createElement("div");
+                div.className = "session-item";
+                div.dataset.id = s.id;
+                div.innerHTML = `
+                    <span class="session-title" title="${escapeHtml(s.title)}">${escapeHtml(s.title)}</span>
+                    <button class="session-delete" title="删除">✕</button>
+                `;
+                // 运行中标记
+                if (sessionStates[s.id] && sessionStates[s.id].status === "running") {
+                    const badge = document.createElement("span");
+                    badge.textContent = "⏳";
+                    badge.style.cssText = "margin-left: 4px; font-size: 11px;";
+                    const titleEl = div.querySelector(".session-title");
+                    if (titleEl) titleEl.after(badge);
+                }
+                div.addEventListener("click", (e) => {
+                    if (e.target.classList.contains("session-delete")) return;
+                    switchSession(s.id);
+                });
+                div.querySelector(".session-delete").addEventListener("click", async (e) => {
+                    e.stopPropagation();
+                    if (!confirm(`确定删除「${s.title}」吗？`)) return;
+                    await fetch(`/sessions/${s.id}`, { method: "DELETE" });
+                    if (currentSessionId === s.id) currentSessionId = null;
+                    await loadSessions();
+                });
+                list.appendChild(div);
+            });
+            if (currentSessionId) highlightSession(currentSessionId);
+        }
+
+        function highlightSession(id) {
+            document.querySelectorAll(".session-item").forEach(el => {
+                el.classList.toggle("active", Number(el.dataset.id) === id);
+            });
+        }
+
+        async function switchSession(sessionId) {
+            // 上一个会话若仍在后台运行：其 SSE 继续、sessionStates 保留（不中断、不清空）
+            const prevSessionId = currentSessionId;
+            currentSessionId = sessionId;
+            highlightSession(sessionId);
+            chat.innerHTML = "";
+            clearPlan();
+
+            try {
+                const res = await fetch(`/history/${sessionId}`);
+                const messages = await res.json();
+                messages.forEach(m => {
+                    const t = m.created_at && m.created_at.length >= 16
+                        ? m.created_at.slice(0, 16) : "";
+                    if (m.role === "user") {
+                        // 历史里的用户消息可能是 JSON（含图片 data URL），解析后一起回显
+                        let utext = m.content, uimgs = [];
+                        try {
+                            const o = JSON.parse(m.content);
+                            if (o && typeof o === "object" && typeof o.text === "string") {
+                                utext = o.text;
+                                uimgs = Array.isArray(o.images) ? o.images : [];
+                            }
+                        } catch (e) { /* 纯文本消息，保持原样 */ }
+                        addUserMessage(utext, t, uimgs);
+                    } else {
+                        restoreAssistantMessage(m.content, t);
+                    }
+                });
+
+                // 若切回的会话有"运行中的任务"：从内存重绘 + 重新挂载实时输出
+                const st = sessionStates[sessionId];
+                if (st && st.status === "running") {
+                    const restored = addAssistantMessage();
+                    restored.bubble.innerHTML =
+                        DOMPurify.sanitize(marked.parse(st.fullText || ""));
+                    restored.bubble.querySelectorAll('pre code').forEach(block => {
+                        hljs.highlightElement(block);
+                    });
+                    // 关键：把后台任务的 ctx 重新指向这块新 DOM，后续 SSE 继续写到这里
+                    if (st.ctx) Object.assign(st.ctx, restored);
+
+                    const hint = document.createElement("div");
+                    hint.className = "bubble session-running-hint";
+                    hint.style.cssText = "background:#f3f4f6;color:#6b7280;margin-top:6px;";
+                    hint.textContent = "⏳ 该会话仍在运行中，输出将实时更新…";
+                    restored.bubble.parentElement.appendChild(hint);
+                    // 记录引用：本会话后台任务结束时（runTask 的 finally）必须移除它，
+                    // 否则会话已跑完，这里仍残留"⏳ 该会话仍在运行中…"
+                    st.hintEl = hint;
+
+                    if (st.plan) renderPlan(st.plan);
+
+                    // 补渲染 pendingConfirm（缺口 1 修复）
+                    if (st.pendingConfirm) {
+                        const ev = st.pendingConfirm;
+                        if (ev.type === "confirm_write") {
+                            showWriteConfirm(restored, ev.path, ev.old_content, ev.new_content);
+                        } else if (ev.type === "confirm_delete") {
+                            showDeleteConfirm(restored, ev.path, "");
+                        } else if (ev.type === "confirm_command") {
+                            showCommandConfirm(restored, ev.cmd);
+                        }
+                        // 清掉，避免重复渲染
+                        delete st.pendingConfirm;
+                    }
+
+                    // 重绘 execHistory（缺口 2 修复）：切回后台运行中的会话时恢复执行卡片
+                    if (st.execHistory && st.execHistory.length > 0) {
+                        // 先清空执行详情区（restored 是本会话刚建的新 DOM）
+                        restored.execList.innerHTML = "";
+                        let replayResultEl = null;   // 等价于实时渲染里的 lastResultEl
+                        for (const hev of st.execHistory) {
+                            if (hev.type === "tool_call") {
+                                // 与实时渲染同款：写入 restored.execList
+                                replayResultEl = appendToolCall(restored, hev.name, hev.args);
+                            } else if (hev.type === "tool_result") {
+                                if (replayResultEl) updateToolResult(replayResultEl, hev.content);
+                            } else if (hev.type === "phase") {
+                                // 与实时渲染同款：doing 建卡片，done 更新状态
+                                if (hev.status === "doing") {
+                                    createPhaseCard(restored, hev.name);
+                                } else {
+                                    updatePhaseStatus(restored, hev.name, hev.status);
+                                }
+                            } else if (hev.type === "plan_from_planner") {
+                                // 与实时渲染同款：写进最近一张阶段卡片的 body
+                                const card = restored.bubble.parentElement.querySelector(".phase-card:last-of-type .phase-body");
+                                if (card) {
+                                    const steps = (hev.plan && hev.plan.steps) || [];
+                                    card.innerHTML = `
+                                        <div style="font-weight:600;margin-bottom:6px;">📋 任务计划</div>
+                                        <div class="planner-steps">
+                                            ${steps.map((s, i) => `<div class="planner-step">${i + 1}. ${escapeHtml(s)}</div>`).join("")}
+                                        </div>
+                                    `;
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error("加载历史失败", e);
+            }
+
+            // 按钮状态跟随"被切换到的会话"：A 在跑时切到 B，B 仍可发起新任务（多会话并行）
+            const runBtn = document.getElementById("runBtn");
+            if (runBtn) {
+                const sidRunning = !!(sessionStates[sessionId] && sessionStates[sessionId].status === "running");
+                runBtn.disabled = sidRunning;
+                runBtn.textContent = sidRunning ? "运行中..." : "执行";
+            }
+
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        async function createNewSession() {
+            try {
+                const res = await fetch("/sessions", { method: "POST" });
+                const data = await res.json();
+                currentSessionId = data.id;
+                await loadSessions();
+                switchSession(data.id);
+            } catch (e) {
+                console.error("新建会话失败", e);
+            }
+        }
+
+
+        function saveProjectRoot() {
+            const root = document.getElementById("projectRootInput").value.trim();
+            localStorage.setItem("projectRoot", root);
+            alert("✅ 项目路径已保存：" + (root || "（已清空）"));
+            loadProjectTree();  // 刷新树
+        }
+
+        async function selectProjectFolder() {
+            try {
+                const res = await fetch("/api/select_folder", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({}),
+                });
+                const data = await res.json();
+                if (data.ok && data.path) {
+                    document.getElementById("projectRootInput").value = data.path;
+                    // 自动保存
+                    localStorage.setItem("projectRoot", data.path);
+                    alert("✅ 已选择项目：" + data.path);
+                } else if (data.error) {
+                    alert("❌ " + data.error);
+                }
+            } catch (e) {
+                alert("❌ 弹窗失败：" + e.message);
+            }
+        }
+
+        function loadProjectRoot() {
+            const root = localStorage.getItem("projectRoot") || "";
+            document.getElementById("projectRootInput").value = root;
+        }
+
+        // ============ 项目树 ============
+        let _treeData = null;
+
+        function toggleProjectTree() {
+            const panel = document.getElementById("projectTreePanel");
+            const btn = document.getElementById("ptToggleBtn");
+            const collapsed = panel.classList.toggle("collapsed");
+            btn.textContent = collapsed ? "▶" : "◀";
+            localStorage.setItem("projectTreeCollapsed", collapsed ? "1" : "0");
+        }
+
+        function restoreProjectTreeState() {
+            const collapsed = localStorage.getItem("projectTreeCollapsed") === "1";
+            if (collapsed) {
+                const panel = document.getElementById("projectTreePanel");
+                const btn = document.getElementById("ptToggleBtn");
+                if (panel && btn) {
+                    panel.classList.add("collapsed");
+                    btn.textContent = "▶";
+                }
+            }
+        }
+
+        async function loadProjectTree() {
+            const root = localStorage.getItem("projectRoot") || "";
+            if (!root) {
+                document.getElementById("projectTree").innerHTML = '<div style="padding: 8px 12px; color: #9ca3af; font-size: 12px;">（未选择项目）</div>';
+                return;
+            }
+            try {
+                const res = await fetch("/api/project_tree?path=" + encodeURIComponent(root) + "&depth=3");
+                const data = await res.json();
+                if (data.error) {
+                    document.getElementById("projectTree").innerHTML = `<div style="padding: 8px 12px; color: #ef4444; font-size: 12px;">❌ ${data.error}</div>`;
+                    return;
+                }
+                _treeData = data.tree;
+                renderTree(data.tree);
+            } catch (e) {
+                document.getElementById("projectTree").innerHTML = `<div style="padding: 8px 12px; color: #ef4444; font-size: 12px;">❌ ${e.message}</div>`;
+            }
+        }
+
+        function renderTree(node) {
+            const container = document.getElementById("projectTree");
+            container.innerHTML = "";
+            if (!node || !node.children) return;
+            node.children.forEach(child => {
+                container.appendChild(renderTreeNode(child, 0));
+            });
+        }
+
+        function renderTreeNode(node, level) {
+            const div = document.createElement("div");
+            const item = document.createElement("div");
+            item.className = "tree-item " + node.type;
+            item.style.paddingLeft = (12 + level * 12) + "px";
+
+            if (node.type === "dir") {
+                item.innerHTML = `<span class="icon">📁</span>`;
+                const nameSpan = document.createElement("span");
+                nameSpan.textContent = node.name;
+                item.appendChild(nameSpan);
+                item.onclick = () => {
+                    // 展开/折叠
+                    const children = div.querySelector(".tree-children");
+                    if (children) {
+                        children.style.display = children.style.display === "none" ? "block" : "none";
+                    }
+                };
+                div.appendChild(item);
+
+                const children = document.createElement("div");
+                children.className = "tree-children";
+                children.style.display = "none";  // 默认折叠
+                if (node.children) {
+                    node.children.forEach(c => children.appendChild(renderTreeNode(c, level + 1)));
+                }
+                div.appendChild(children);
+            } else {
+                item.innerHTML = `<span class="icon">📄</span>`;
+                const nameSpan2 = document.createElement("span");
+                nameSpan2.textContent = node.name;
+                item.appendChild(nameSpan2);
+                item.onclick = () => {
+                    // 点击文件 → 填入输入框（或预览）
+                    document.getElementById("task").value = `读取文件 ${node.path} 并总结内容`;
+                    document.getElementById("task").focus();
+                };
+                div.appendChild(item);
+            }
+            return div;
+        }
+
+        // ============ 图片上传 / 粘贴（多模态）============
+        const MAX_IMAGE_BYTES = 10 * 1024 * 1024;   // 单张上限 10MB
+        let pendingImages = [];   // [{ dataUrl, name }]
+
+        // 将图片文件压缩到最长边 maxSize 像素，返回 data URL
+        function compressImage(file, maxSize = 1024, quality = 0.85) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onerror = () => reject(new Error("读取图片失败"));
+                reader.onload = e => {
+                    const img = new Image();
+                    img.onerror = () => reject(new Error("图片解析失败"));
+                    img.onload = () => {
+                        let w = img.width, h = img.height;
+                        const longest = Math.max(w, h);
+                        // 小于 maxSize 则不放大
+                        if (longest <= maxSize) {
+                            resolve(e.target.result);
+                            return;
+                        }
+                        const scale = maxSize / longest;
+                        const nw = Math.round(w * scale);
+                        const nh = Math.round(h * scale);
+                        const canvas = document.createElement("canvas");
+                        canvas.width = nw;
+                        canvas.height = nh;
+                        const ctx = canvas.getContext("2d");
+                        // 白底填充（防止 PNG 透明背景变黑）
+                        ctx.fillStyle = "#ffffff";
+                        ctx.fillRect(0, 0, nw, nh);
+                        ctx.drawImage(img, 0, 0, nw, nh);
+                        // 统一输出 JPEG（体积最小）
+                        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+                        console.log(`[IMG] 压缩: ${file.name} ${(file.size/1024).toFixed(0)}KB → ${(dataUrl.length*0.75/1024).toFixed(0)}KB`);
+                        resolve(dataUrl);
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function handleImageFiles(files) {
+            const list = Array.from(files || []);
+            for (const file of list) {
+                if (!file.type || !file.type.startsWith("image/")) continue;
+                if (file.size > MAX_IMAGE_BYTES) {
+                    alert(`图片过大：${file.name || "image"}（${(file.size / 1024 / 1024).toFixed(1)}MB），上限 10MB`);
+                    continue;
+                }
+                compressImage(file, 1024, 0.85)
+                    .then(dataUrl => {
+                        pendingImages.push({ dataUrl, name: file.name || "image" });
+                        renderImagePreview();
+                    })
+                    .catch(err => {
+                        console.warn("[IMG] 压缩失败，跳过：", err);
+                        alert(`图片处理失败：${file.name || "image"}`);
+                    });
+            }
+            // 允许连续选择同一个文件
+            const input = document.getElementById("imageInput");
+            if (input) input.value = "";
+        }
+
+        function removeImage(index) {
+            pendingImages.splice(index, 1);
+            renderImagePreview();
+        }
+
+        function renderImagePreview() {
+            const box = document.getElementById("imagePreview");
+            if (!box) return;
+            if (!pendingImages.length) {
+                box.style.display = "none";
+                box.innerHTML = "";
+                return;
+            }
+            box.style.display = "flex";
+            box.innerHTML = pendingImages.map((img, i) => `
+                <div class="img-thumb" title="${escapeHtml(img.name)}">
+                    <img src="${img.dataUrl}" alt="${escapeHtml(img.name)}" onclick="openLightbox('${img.dataUrl}')">
+                    <button type="button" class="img-thumb-del" onclick="removeImage(${i})" title="移除">×</button>
+                </div>
+            `).join("");
+        }
+
+        function clearImages() {
+            pendingImages = [];
+            renderImagePreview();
+        }
+
+        function openLightbox(src) {
+            const box = document.getElementById("imgLightbox");
+            const img = document.getElementById("imgLightboxSrc");
+            if (!box || !img) return;
+            img.src = src;
+            box.classList.add("show");
+        }
+
+        function closeLightbox(e) {
+            // 点击图片本身不关闭，只有点击遮罩层才关闭
+            if (e && e.target && e.target.id === "imgLightboxSrc") return;
+            const box = document.getElementById("imgLightbox");
+            if (box) box.classList.remove("show");
+        }
+
+        // 粘贴图片：仅在输入框聚焦时生效
+        document.addEventListener("paste", e => {
+            const taskEl = document.getElementById("task");
+            if (!taskEl || document.activeElement !== taskEl) return;
+            const items = (e.clipboardData && e.clipboardData.items) || [];
+            const files = [];
+            for (const item of items) {
+                if (item.type && item.type.startsWith("image/")) {
+                    const f = item.getAsFile();
+                    if (f) files.push(f);
+                }
+            }
+            if (files.length) {
+                e.preventDefault();
+                handleImageFiles(files);
+            }
+        });
+
+        // ============ 模型选择器 ============
+        let providersData = [];
+        let currentProviderId = "";
+        let currentModelName = "";
+
+        async function loadProviders() {
+            try {
+                const res = await fetch("/api/providers");
+                const data = await res.json();
+                providersData = data.providers || [];
+
+                // 从 localStorage 恢复上次选择，或使用默认
+                const savedPid = localStorage.getItem("providerId");
+                const savedModel = localStorage.getItem("modelName");
+                const defaultPid = data.default || (providersData[0] && providersData[0].id);
+
+                if (savedPid && providersData.find(p => p.id === savedPid)) {
+                    currentProviderId = savedPid;
+                    currentModelName = savedModel || providersData.find(p => p.id === savedPid).default_model;
+                } else {
+                    currentProviderId = defaultPid;
+                    const p = providersData.find(x => x.id === defaultPid);
+                    currentModelName = p ? p.default_model : "";
+                }
+
+                updateModelPickerUI();
+                renderModelPickerDropdown();
+                if (multiAgentMode) initRoleSelection();   // 批次 4：provider 列表就绪后同步三角色选择器
+            } catch (e) {
+                console.error("[ModelPicker] 加载 provider 失败", e);
+            }
+        }
+
+        function updateModelPickerUI() {
+            const p = providersData.find(x => x.id === currentProviderId);
+            if (!p) return;
+            const iconEl = document.getElementById("modelPickerIcon");
+            const labelEl = document.getElementById("modelPickerLabel");
+            if (iconEl) iconEl.textContent = p.icon;
+            if (labelEl) labelEl.textContent = p.name + " · " + currentModelName;
+        }
+
+        function toggleModelPicker(event) {
+            if (event) event.stopPropagation();
+            const dd = document.getElementById("modelPickerDropdown");
+            if (dd) dd.classList.toggle("show");
+        }
+
+        function renderModelPickerDropdown() {
+            const dd = document.getElementById("modelPickerDropdown");
+            if (!dd) return;
+            dd.innerHTML = providersData.map(p => {
+                const lockTag = p.has_key ? "" : '<span class="locked">🔒 未配置</span>';
+                const items = p.models.map(m => {
+                    const isActive = (currentProviderId === p.id && currentModelName === m);
+                    const isDefault = (m === p.default_model);
+                    const disabledClass = p.has_key ? "" : "disabled";
+                    const onclick = p.has_key ? `selectModel('${p.id}', '${m}')` : "";
+                    return `
+                        <div class="model-item ${isActive ? 'active' : ''} ${disabledClass}"
+                             onclick="${onclick}">
+                            <span>${m}${isDefault ? '<span class="default-tag">默认</span>' : ''}</span>
+                        </div>
+                    `;
+                }).join("");
+                return `
+                    <div class="provider-group">
+                        <div class="provider-header">${p.icon} ${p.name} ${lockTag}</div>
+                        ${items}
+                    </div>
+                `;
+            }).join("");
+        }
+
+        function selectModel(providerId, model) {
+            currentProviderId = providerId;
+            currentModelName = model;
+            updateModelPickerUI();
+            renderModelPickerDropdown();
+            const dd = document.getElementById("modelPickerDropdown");
+            if (dd) dd.classList.remove("show");
+            localStorage.setItem("providerId", providerId);
+            localStorage.setItem("modelName", model);
+        }
+
+        // 点击外部关闭下拉
+        document.addEventListener("click", e => {
+            const picker = document.getElementById("modelPicker");
+            if (picker && !picker.contains(e.target)) {
+                const dd = document.getElementById("modelPickerDropdown");
+                if (dd) dd.classList.remove("show");
+            }
+        });
+
+        // 页面加载时拉取 provider 列表
+        if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", loadProviders);
+        } else {
+            loadProviders();
+        }
+
+        // ===== 多 Agent 三角色选择器（批次 4）=====
+        const roleSelection = {
+            planner: { providerId: "", model: "" },
+            executor: { providerId: "", model: "" },
+            reviewer: { providerId: "", model: "" },
+        };
+
+        function initRoleSelection() {
+            if (!providersData.length) return;   // provider 列表未就绪，等 loadProviders 完成后重调
+            for (const role of ["planner", "executor", "reviewer"]) {
+                const savedPid = localStorage.getItem(`role_${role}_providerId`);
+                const savedModel = localStorage.getItem(`role_${role}_model`);
+                const savedProvider = savedPid ? providersData.find(p => p.id === savedPid) : null;
+                if (savedProvider) {
+                    roleSelection[role].providerId = savedPid;
+                    roleSelection[role].model = savedModel || savedProvider.default_model;
+                } else {
+                    // 默认继承单 Agent 选择器
+                    roleSelection[role].providerId = currentProviderId;
+                    roleSelection[role].model = currentModelName;
+                }
+                updateRolePickerUI(role);
+            }
+        }
+
+        function updateRolePickerUI(role) {
+            const sel = roleSelection[role];
+            const p = providersData.find(x => x.id === sel.providerId);
+            if (!p) return;
+            const iconEl = document.getElementById(`${role}PickerIcon`);
+            const labelEl = document.getElementById(`${role}PickerLabel`);
+            if (iconEl) iconEl.textContent = p.icon;
+            if (labelEl) labelEl.textContent = `${p.name} · ${sel.model}`;
+        }
+
+        function toggleRolePicker(role, event) {
+            if (event) event.stopPropagation();
+            // 关闭所有其他下拉
+            document.querySelectorAll(".role-picker-dropdown").forEach(dd => dd.classList.remove("show"));
+            const dd = document.getElementById(`${role}PickerDropdown`);
+            if (dd) {
+                dd.classList.toggle("show");
+                if (dd.classList.contains("show")) renderRolePickerDropdown(role);
+            }
+        }
+
+        function renderRolePickerDropdown(role) {
+            const dd = document.getElementById(`${role}PickerDropdown`);
+            if (!dd) return;
+            const sel = roleSelection[role];
+            dd.innerHTML = providersData.map(p => {
+                const lockTag = p.has_key ? "" : '<span class="locked">🔒 未配置</span>';
+                const items = (p.models || []).map(m => {
+                    const isActive = (sel.providerId === p.id && sel.model === m);
+                    const isDefault = (m === p.default_model);
+                    const disabledClass = p.has_key ? "" : "disabled";
+                    const onclick = p.has_key ? `selectRoleModel('${role}', '${p.id}', '${m}')` : "";
+                    return `
+                        <div class="model-item ${isActive ? 'active' : ''} ${disabledClass}" onclick="${onclick}">
+                            <span>${m}${isDefault ? '<span class="default-tag">默认</span>' : ''}</span>
+                        </div>
+                    `;
+                }).join("");
+                return `
+                    <div class="provider-group">
+                        <div class="provider-header">${p.icon} ${p.name} ${lockTag}</div>
+                        ${items}
+                    </div>
+                `;
+            }).join("");
+        }
+
+        function selectRoleModel(role, providerId, model) {
+            roleSelection[role].providerId = providerId;
+            roleSelection[role].model = model;
+            updateRolePickerUI(role);
+            const dd = document.getElementById(`${role}PickerDropdown`);
+            if (dd) dd.classList.remove("show");
+            localStorage.setItem(`role_${role}_providerId`, providerId);
+            localStorage.setItem(`role_${role}_model`, model);
+        }
+
+        // 点击外部关闭所有角色下拉
+        document.addEventListener("click", e => {
+            let clickedInside = false;
+            document.querySelectorAll(".role-picker").forEach(rp => { if (rp.contains(e.target)) clickedInside = true; });
+            if (!clickedInside) {
+                document.querySelectorAll(".role-picker-dropdown").forEach(dd => dd.classList.remove("show"));
+            }
+        });
+
+        // ============ 执行任务 ============
+        async function runTask() {
+            const input = document.getElementById("task");
+            const btn = document.getElementById("runBtn");
+            const task = input.value.trim();
+            const images = pendingImages.map(img => img.dataUrl);   // 待发送图片（data URL）
+            if (!task && !images.length) return;
+            if (!currentSessionId) {
+                await createNewSession();
+            }
+
+            const mySessionId = currentSessionId;
+            sessionStates[mySessionId] = { status: "running", fullText: "", plan: null, ctx: null };
+            loadSessions();   // 刷新会话列表，显示 ⏳
+
+            addUserMessage(task, null, images);
+            clearImages();
+            input.value = "";
+            btn.disabled = true;
+            btn.textContent = "运行中...";
+
+            const ctx = addAssistantMessage();
+            sessionStates[mySessionId].ctx = ctx;   // 供切回本会话时重新挂载实时输出
+            ctx.sessionId = mySessionId;            // 标注 ctx 归属，供确认操作判断"用户是否仍停留在本会话"
+            let fullText = "";
+            let lastResultEl = null;
+
+            try {
+                const url = multiAgentMode ? "/run_multi" : "/run";
+                const settings = {};  // 批次 4：前端不再配置 API，后端写死
+                const body = {
+                    task: task || "[图片]",   // 仅图片、无文字时给个占位，避免后端判定任务为空
+                    session_id: currentSessionId,
+                    provider_id: currentProviderId || null,
+                    model: currentModelName || null,
+                    project_root: localStorage.getItem("projectRoot") || null,
+                };
+                if (images.length) body.images = images;   // 仅在有图片时才带，避免污染纯文本请求
+                if (multiAgentMode) {
+                    // 多 Agent：三角色独立 provider + model
+                    body.provider_id = roleSelection.executor.providerId || currentProviderId;
+                    body.planner_provider_id = roleSelection.planner.providerId || currentProviderId;
+                    body.reviewer_provider_id = roleSelection.reviewer.providerId || currentProviderId;
+                    body.model = roleSelection.executor.model || currentModelName;
+                    body.planner_model = roleSelection.planner.model;
+                    body.executor_model = roleSelection.executor.model;
+                    body.reviewer_model = roleSelection.reviewer.model;
+                }
+
+                const res = await fetch(url, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body)
+                });
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder("utf-8");
+                let buffer = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const parts = buffer.split("\n\n");
+                    buffer = parts.pop();
+
+                    for (const part of parts) {
+                        if (!part.startsWith("data: ")) continue;
+                        const data = part.slice(6).trim();
+                        try {
+                            const ev = JSON.parse(data);
+                            console.log("[SSE]", ev.type, ev);
+                            // ✅ 先记录到内存：不论当前停留在哪个会话，都要留痕
+                            if (!sessionStates[mySessionId].execHistory) sessionStates[mySessionId].execHistory = [];
+                            if (ev.type === "text") {
+                                fullText += ev.content;
+                                sessionStates[mySessionId].fullText = fullText;
+                            } else if (ev.type === "plan_update") {
+                                sessionStates[mySessionId].plan = ev.plan;
+                            } else if (ev.type === "tool_call" || ev.type === "tool_result" || ev.type === "phase" || ev.type === "plan_from_planner") {
+                                // 缺口 2 修复：执行类事件留在内存，切回本会话时按序重绘
+                                sessionStates[mySessionId].execHistory.push(ev);
+                            }
+                            // ✅ 只有仍停留在本会话时才写 DOM；否则只更新内存，不干扰当前会话
+                            const isActive = (currentSessionId === mySessionId);
+                            if (!isActive) {
+                                // 保存 confirm_* 事件到 sessionStates，切回时补渲染
+                                if (ev.type === "confirm_write" || ev.type === "confirm_delete" || ev.type === "confirm_command") {
+                                    if (sessionStates[mySessionId]) {
+                                        sessionStates[mySessionId].pendingConfirm = ev;
+                                    }
+                                }
+                                continue;
+                            }
+                            if (ev.type === "text") {
+                                ctx.bubble.innerHTML = DOMPurify.sanitize(marked.parse(fullText));
+                                chat.scrollTop = chat.scrollHeight;
+                            } else if (ev.type === "token_usage") {
+                                console.log("[TOKEN]", ev, "el=", ctx.tokenInfo);
+                                ctx.tokenInfo.innerHTML =
+                                    `⚡ <span class="token-num">${ev.total_tokens}</span> tokens ` +
+                                    `(输入 ${ev.prompt_tokens} · 输出 ${ev.completion_tokens} · ${ev.steps} 步)`;
+                                ctx.details.style.display = "block";
+                            } else if (ev.type === "phase") {
+                                if (ev.status === "doing") {
+                                    createPhaseCard(ctx, ev.name);
+                                } else {
+                                    updatePhaseStatus(ctx, ev.name, ev.status);
+                                }
+                            } else if (ev.type === "plan_from_planner") {
+                                const card = ctx.bubble.parentElement.querySelector(".phase-card:last-of-type .phase-body");
+                                if (card) {
+                                    const steps = ev.plan.steps || [];
+                                    card.innerHTML = `
+                                        <div style="font-weight:600;margin-bottom:6px;">📋 任务计划</div>
+                                        <div class="planner-steps">
+                                            ${steps.map((s, i) => `<div class="planner-step">${i + 1}. ${escapeHtml(s)}</div>`).join("")}
+                                        </div>
+                                    `;
+                                }
+                            } else if (ev.type === "review_result") {
+                                const card = ctx.bubble.parentElement.querySelector(".phase-card:last-of-type .phase-body");
+                                if (card) {
+                                    const r = ev.result || {};
+                                    const passedClass = r.passed === true
+                                        ? "review-passed"
+                                        : (r.passed === false ? "review-failed" : "review-unknown");
+                                    const passedText = r.passed === true
+                                        ? "✅ 通过"
+                                        : (r.passed === false ? "❌ 未通过" : "⚠️ 审查未完成");
+                                    const suggestions = (r.suggestions || []).map(s => `<li>${escapeHtml(s)}</li>`).join("");
+                                    card.innerHTML = `
+                                        <div class="${passedClass}">${passedText}</div>
+                                        <div class="review-reason">${escapeHtml(r.reason || "")}</div>
+                                        ${suggestions ? `<ul class="review-suggestions">${suggestions}</ul>` : ""}
+                                    `;
+                                }
+                            } else if (ev.type === "confirm_delete") {
+                                // 显示确认按钮
+                                showDeleteConfirm(ctx, ev.path, task);
+                            } else if (ev.type === "confirm_write") {
+                                showWriteConfirm(ctx, ev.path, ev.old_content, ev.new_content);
+                            } else if (ev.type === "confirm_command") {
+                                showCommandConfirm(ctx, ev.cmd);
+                            } else if (ev.type === "plan_update") {
+                                renderPlan(ev.plan);
+                            } else if (ev.type === "tool_call") {
+                                lastResultEl = appendToolCall(ctx, ev.name, ev.args);
+                            } else if (ev.type === "tool_result") {
+                                if (lastResultEl) updateToolResult(lastResultEl, ev.content);
+                            } else if (ev.type === "error") {
+                                ctx.bubble.style.color = "#b91c1c";
+                                ctx.bubble.textContent = "⚠️ " + ev.content;
+                            } else if (ev.type === "done") {
+                                ctx.details.open = false;
+                            }
+                        } catch (e) { }
+                    }
+                }
+                // 流结束后，重新渲染 + 高亮（仅当仍停留在本会话时才写 DOM）
+                if (currentSessionId === mySessionId) {
+                    ctx.bubble.innerHTML = DOMPurify.sanitize(marked.parse(fullText));
+                    ctx.bubble.querySelectorAll('pre code').forEach(block => {
+                        hljs.highlightElement(block);
+                    });
+                }
+                await loadSessions();
+            } catch (err) {
+                if (currentSessionId === mySessionId) {
+                    ctx.bubble.textContent = "❌ 请求失败：" + err.message;
+                }
+            } finally {
+                sessionStates[mySessionId].status = "done";
+                // 本会话的"运行中"提示条若还在（用户停留/切回本会话时由 switchSession 注入），
+                // 必须在这里移除，否则会话已结束、对话区仍显示"⏳ 该会话仍在运行中…"
+                if (sessionStates[mySessionId].hintEl) {
+                    sessionStates[mySessionId].hintEl.remove();
+                    sessionStates[mySessionId].hintEl = null;
+                }
+                loadSessions();   // 刷新会话列表，去掉 ⏳（不论当前在哪个会话）
+                if (currentSessionId === mySessionId) {
+                    btn.disabled = false;
+                    btn.textContent = "执行";
+                    input.focus();
+                }
+            }
+        }
+
+        document.getElementById("task").addEventListener("keydown", e => {
+            if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                runTask();
+            }
+        });
+
+        loadSessions();
+        loadDocuments();
+        // ===== 输入框自动长高 =====
+        const inputEl = document.getElementById("task");
+
+        function autoResizeInput() {
+            inputEl.style.height = "auto";
+            inputEl.style.height = Math.min(inputEl.scrollHeight, 300) + "px";
+        }
+
+        inputEl.addEventListener("input", autoResizeInput);
+
+        // 初始化高度
+        autoResizeInput();
+
+        // Enter 发送，Shift+Enter 换行
+        inputEl.addEventListener("keydown", e => {
+            if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                runTask();
+            }
+        });
+
+        // ===== 任务计划面板 =====
+        function renderPlan(plan) {
+            const panel = document.getElementById("planPanel");
+            const list = document.getElementById("planList");
+
+            if (!plan || plan.length === 0) {
+                panel.style.display = "none";
+                return;
+            }
+
+            panel.style.display = "block";
+            list.innerHTML = "";
+
+            plan.forEach((item, idx) => {
+                const status = item.status || "pending";
+                const iconMap = {
+                    "pending": "○",
+                    "doing": "⏳",
+                    "done": "✅",
+                    "failed": "❌",
+                };
+                const icon = iconMap[status] || "○";
+
+                const div = document.createElement("div");
+                div.className = "plan-item " + status;
+                div.innerHTML = `
+            <span class="plan-icon">${icon}</span>
+            <span class="plan-text">${idx + 1}. ${escapeHtml(item.step)}</span>
+        `;
+                list.appendChild(div);
+            });
+        }
+
+        function togglePlan() {
+            const list = document.getElementById("planList");
+            const btn = document.querySelector(".plan-toggle");
+            if (list.style.display === "none") {
+                list.style.display = "flex";
+                btn.textContent = "收起";
+            } else {
+                list.style.display = "none";
+                btn.textContent = "展开";
+            }
+        }
+        function showCommandConfirm(ctx, cmd) {
+            const existing = ctx.bubble.parentElement.querySelector(".confirm-actions");
+            if (existing) existing.remove();
+
+            const div = document.createElement("div");
+            div.className = "confirm-actions";
+            div.style.flexDirection = "column";
+            div.style.alignItems = "stretch";
+            div.innerHTML = `
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span class="confirm-text" style="flex:1;">⚡ 确认执行命令？</span>
+                    <button class="confirm-btn yes" title="执行">✓</button>
+                    <button class="confirm-btn no" title="取消">✗</button>
+                </div>
+                <pre style="margin-top:6px;padding:8px;background:#1e293b;color:#e2e8f0;border-radius:6px;font-size:12px;white-space:pre-wrap;word-break:break-all;">${escapeHtml(cmd)}</pre>
+            `;
+
+            div.querySelector(".confirm-btn.yes").addEventListener("click", () => {
+                div.remove();
+                // 用户确认后：续跑 Agent（复用 pending state，从原 step 继续）
+                resumeRun(ctx);
+            });
+
+            div.querySelector(".confirm-btn.no").addEventListener("click", () => {
+                div.remove();
+                const cancelMsg = document.createElement("div");
+                cancelMsg.className = "bubble";
+                cancelMsg.style.background = "#f3f4f6";
+                cancelMsg.style.color = "#6b7280";
+                cancelMsg.style.marginTop = "6px";
+                cancelMsg.textContent = "❌ 已取消执行";
+                ctx.bubble.parentElement.appendChild(cancelMsg);
+            });
+
+            ctx.bubble.parentElement.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        // 切换会话时清空计划面板
+        function clearPlan() {
+            document.getElementById("planPanel").style.display = "none";
+        }
+        function applyTheme(isDark) {
+            document.body.classList.toggle("dark", isDark);
+            const btn = document.getElementById("themeBtn");
+            if (btn) btn.textContent = isDark ? "☀️" : "🌙";
+            localStorage.setItem("theme", isDark ? "dark" : "light");
+        }
+        function toggleTheme() {
+            const isDark = !document.body.classList.contains("dark");
+            applyTheme(isDark);
+        }
+        // 导出当前会话
+        function exportCurrentSession() {
+            if (!currentSessionId) {
+                alert("当前没有选中的会话");
+                return;
+            }
+            const a = document.createElement("a");
+            a.href = `/export/${currentSessionId}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        (function initTheme() {
+            const saved = localStorage.getItem("theme");
+            if (saved === "dark") {
+                applyTheme(true);
+            }
+        })();
+
+        // ===== 文档管理 =====
+        async function loadDocuments() {
+            try {
+                const res = await fetch("/documents");
+                const docs = await res.json();
+                renderDocList(docs);
+            } catch (e) {
+                console.error("加载文档失败", e);
+            }
+        }
+
+        function renderDocList(docs) {
+            const list = document.getElementById("docList");
+            list.innerHTML = "";
+
+            if (!docs || docs.length === 0) {
+                list.innerHTML = '<div class="doc-empty">暂无文档</div>';
+                return;
+            }
+
+            docs.forEach(d => {
+                const div = document.createElement("div");
+                div.className = "doc-item";
+                div.innerHTML = `
+                    <span class="doc-name" title="${escapeHtml(d.filename)}">${escapeHtml(d.filename)}</span>
+                    <span class="doc-chunks">${d.chunk_count}段</span>
+                    <button class="doc-delete" title="删除">✕</button>
+                `;
+
+                div.querySelector(".doc-delete").addEventListener("click", async () => {
+                    if (!confirm(`确定删除文档「${d.filename}」吗？`)) return;
+                    await fetch(`/documents/${d.id}`, { method: "DELETE" });
+                    await loadDocuments();
+                });
+
+                list.appendChild(div);
+            });
+        }
+
+        function triggerUpload() {
+            document.getElementById("fileInput").click();
+        }
+
+        async function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            if (file.size > 20 * 1024 * 1024) {
+                alert("文件太大，请上传 5MB 以内的文件");
+                event.target.value = "";
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append("file", file);
+
+            const docList = document.getElementById("docList");
+            const loading = document.createElement("div");
+            loading.className = "doc-empty";
+            loading.textContent = `📤 上传中：${file.name}...`;
+            docList.appendChild(loading);
+
+            try {
+                const res = await fetch("/upload_doc", {
+                    method: "POST",
+                    body: formData
+                });
+                const data = await res.json();
+
+                if (data.error) {
+                    alert("上传失败：" + data.error);
+                }
+            } catch (e) {
+                alert("上传出错：" + e.message);
+            } finally {
+                event.target.value = "";
+                await loadDocuments();
+            }
+        }
+        // ===== 消息操作 =====
+        function editMessage(btn) {
+            const msgDiv = btn.closest(".msg");
+            const raw = msgDiv.dataset.rawText || "";
+            const input = document.getElementById("task");
+            input.value = raw;
+            input.focus();
+            // 删掉这条消息及后面的所有消息
+            let next = msgDiv.nextElementSibling;
+            while (next) {
+                const toRemove = next;
+                next = next.nextElementSibling;
+                toRemove.remove();
+            }
+            msgDiv.remove();
+        }
+
+        function regenerate(btn) {
+            // 找到上一条用户消息
+            const msgDiv = btn.closest(".msg");
+            let prev = msgDiv.previousElementSibling;
+            let userMsg = null;
+            while (prev) {
+                if (prev.classList.contains("user")) {
+                    userMsg = prev.dataset.rawText;
+                    break;
+                }
+                prev = prev.previousElementSibling;
+            }
+            if (!userMsg) {
+                alert("找不到对应的用户问题");
+                return;
+            }
+            // 删掉这条 AI 消息
+            msgDiv.remove();
+            // 重新跑
+            const input = document.getElementById("task");
+            input.value = userMsg;
+            runTask();
+        }
+        function nowTime() {
+            const d = new Date();
+            const pad = n => String(n).padStart(2, "0");
+            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        }
+
+        function copyMessage(btn) {
+            const bubble = btn.closest(".bubble-wrap").querySelector(".bubble");
+            navigator.clipboard.writeText(bubble.innerText).then(() => {
+                btn.textContent = "✅";
+                setTimeout(() => { btn.textContent = "📋"; }, 1500);
+            });
+        }
+
+        // ===== 模式切换 =====
+        function setMode(mode) {
+            multiAgentMode = (mode === "multi");
+            document.querySelectorAll(".mode-btn").forEach(btn => {
+                btn.classList.toggle("active", btn.dataset.mode === mode);
+            });
+            localStorage.setItem("agentMode", mode);
+            // 批次 4：多 Agent 模式显示三角色选择器
+            const mp = document.getElementById("multiAgentPickers");
+            if (mp) mp.style.display = multiAgentMode ? "flex" : "none";
+            if (multiAgentMode) initRoleSelection();
+        }
+
+        // 页面加载时恢复模式
+        (function initMode() {
+            const saved = localStorage.getItem("agentMode") || "single";
+            setMode(saved);
+        })();
+        // ===== 多 Agent 阶段卡片 =====
+        function createPhaseCard(ctx, phaseName) {
+            const card = document.createElement("div");
+            card.className = "phase-card";
+
+            const headerText = {
+                "planner": "🧠 Planner（规划）",
+                "executor": "⚙️ Executor（执行）",
+                "reviewer": "🔍 Reviewer（审查）",
+            }[phaseName] || phaseName;
+
+            card.innerHTML = `
+                <div class="phase-header ${phaseName}">
+                    <span>${headerText}</span>
+                    <span class="phase-status" id="status-${phaseName}">进行中...</span>
+                </div>
+                <div class="phase-body"></div>
+            `;
+
+            // 插到 bubble 前面
+            ctx.bubble.parentElement.insertBefore(card, ctx.bubble);
+            chat.scrollTop = chat.scrollHeight;
+            return card;
+        }
+
+        function updatePhaseStatus(ctx, phaseName, status) {
+            const statusEl = ctx.bubble.parentElement.querySelector(`#status-${phaseName}`);
+            if (statusEl) {
+                if (status === "doing") {
+                    statusEl.textContent = "进行中...";
+                } else if (status === "done") {
+                    statusEl.textContent = "✅ 完成";
+                }
+            }
+        }
+
+        function toggleExportMenu(e) {
+            e.stopPropagation();
+            const menu = document.getElementById("exportMenu");
+            menu.style.display = menu.style.display === "none" ? "block" : "none";
+        }
+
+        function exportAs(fmt) {
+            if (!currentSessionId) {
+                alert("当前没有选中的会话");
+                return;
+            }
+            window.location.href = `/export/${currentSessionId}?format=${fmt}`;
+            document.getElementById("exportMenu").style.display = "none";
+        }
+
+        // 点击别处关闭菜单
+        document.addEventListener("click", () => {
+            const menu = document.getElementById("exportMenu");
+            if (menu) menu.style.display = "none";
+        });
+    </script>
+
+    <!-- 图片放大 Lightbox -->
+    <div id="imgLightbox" onclick="closeLightbox(event)">
+        <img id="imgLightboxSrc" src="" alt="放大预览">
+    </div>
+</body>
+
+</html>

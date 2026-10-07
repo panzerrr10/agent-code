@@ -1,0 +1,20 @@
+# 本文件只放工具配置（pytest / black / ruff）。
+# 运行依赖统一在 requirements.txt / requirements-dev.txt 里声明，避免两处漂移。
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = [".venv", "demos", "resume_build"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+# E501 交由 black 处理行宽，其余保持默认
+ignore = ["E501"]

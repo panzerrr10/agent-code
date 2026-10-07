@@ -1,0 +1,39 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# ===== 密钥与本地配置（务必不要提交）=====
+.env
+.env.local
+.env.*.local
+备忘录*
+*.pem
+*.key
+
+# ===== 运行时数据 =====
+data/
+chat.db
+*.db
+chroma_db/
+.trash/
+.backup/
+.webview_data/
+*.log
+
+# ===== 编辑器 / 系统 =====
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# ===== 个人产物（简历等，不属于项目代码）=====
+*.pdf
+resume_build/
+潘宗_简历*
+简历-项目经历-agent-code.md
