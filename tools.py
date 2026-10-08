@@ -4,8 +4,9 @@ import subprocess
 
 import rag
 import sandbox
+import trash
 from config import MAX_FILE_SIZE, MAX_LIST_ITEMS
-from paths import TRASH_DIR, is_allowed_path
+from paths import is_allowed_path
 from state_store import SessionStateStore
 
 # ============ 工具实现 ============
@@ -262,22 +263,14 @@ def delete_file(path: str) -> str:
         if os.path.isdir(abs_path):
             return f"❌ 只能删除文件，不能删除目录：{path}"
 
-        # 创建 .trash 目录
-        os.makedirs(TRASH_DIR, exist_ok=True)
-
-        # 生成唯一文件名，避免冲突
-        import time
-
-        filename = os.path.basename(abs_path)
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        trash_path = os.path.join(TRASH_DIR, f"{timestamp}_{filename}")
-
-        # 移动文件到 .trash
-        import shutil
-
-        shutil.move(abs_path, trash_path)
-
-        return f"✅ 已删除（移入回收站）：{path}\n恢复路径：.trash/{os.path.basename(trash_path)}"
+        # 移入回收站（同时写 sidecar 记录原始路径，前端可一键恢复）
+        trash_path = trash.move_to_trash(abs_path)
+        if not trash_path:
+            return "❌ 删除失败：无法移入回收站"
+        return (
+            f"✅ 已删除（移入回收站）：{path}\n"
+            f"回收站条目：{os.path.basename(trash_path)}（可在界面「回收站」里一键恢复）"
+        )
     except Exception as e:
         return f"❌ 删除失败：{e}"
 
@@ -300,16 +293,8 @@ def write_file(path: str, content: str) -> str:
         if len(content) > MAX_FILE_SIZE:
             return f"❌ 内容太大（{len(content)} 字符），超过限制"
 
-        # 先备份原文件到 .trash
-        os.makedirs(TRASH_DIR, exist_ok=True)
-
-        import shutil
-        import time
-
-        filename = os.path.basename(abs_path)
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        backup_path = os.path.join(TRASH_DIR, f"{timestamp}_backup_{filename}")
-        shutil.copy2(abs_path, backup_path)
+        # 先备份原文件到 .trash（带 sidecar，前端可一键恢复）
+        backup_path = trash.backup_file(abs_path, kind="backup")
 
         # 写入新内容
         with open(abs_path, "w", encoding="utf-8") as f:
@@ -317,7 +302,8 @@ def write_file(path: str, content: str) -> str:
 
         return (
             f"✅ 已写入文件：{path}（{len(content)} 字符）\n"
-            f"原文件已备份到：.trash/{os.path.basename(backup_path)}"
+            f"原文件已备份到回收站："
+            f"{os.path.basename(backup_path) if backup_path else '（备份失败）'}"
         )
     except Exception as e:
         return f"❌ 写入失败：{e}"
@@ -353,23 +339,15 @@ def edit_file(path: str, old_text: str, new_text: str) -> str:
 
         new_content = content.replace(old_text, new_text, 1)
 
-        # 备份
-        import shutil
-        import time
-
-        os.makedirs(TRASH_DIR, exist_ok=True)
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        backup = os.path.join(
-            TRASH_DIR, f"{timestamp}_edit_{os.path.basename(abs_path)}"
-        )
-        shutil.copy2(abs_path, backup)
+        # 备份（带 sidecar，前端可一键恢复）
+        backup = trash.backup_file(abs_path, kind="edit")
 
         with open(abs_path, "w", encoding="utf-8") as f:
             f.write(new_content)
 
         return (
             f"✅ 已替换 1 处（{len(old_text)} → {len(new_text)} 字符）\n"
-            f"备份：.trash/{os.path.basename(backup)}"
+            f"备份：{os.path.basename(backup) if backup else '（备份失败）'}"
         )
     except Exception as e:
         return f"❌ 编辑失败：{e}"
@@ -381,7 +359,7 @@ def _truncate(text: str, limit: int) -> str:
     return text
 
 
-def _host_run_python(code: str, timeout: int) -> str:
+def _host_run_python(code: str, timeout: int, cancel_event=None) -> str:
     """宿主机兜底执行 Python（仅在 AGENT_ALLOW_HOST_EXEC=1 时才会走到）。"""
     import sys
     import tempfile
@@ -395,22 +373,13 @@ def _host_run_python(code: str, timeout: int) -> str:
         ) as f:
             f.write(code)
             path = f.name
-        r = subprocess.run(
+        out = _run_subprocess(
             [sys.executable, path],
-            cwd=runtime.get_project_root(),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
+            runtime.get_project_root(),
+            timeout,
+            cancel_event=cancel_event,
         )
-        out = ""
-        if r.stdout:
-            out += f"【stdout】\n{r.stdout}"
-        if r.stderr:
-            out += f"\n【stderr】\n{r.stderr}"
-        out += f"\n\n【退出码】{r.returncode}"
         return sandbox.HOST_EXEC_NOTICE + out
-    except subprocess.TimeoutExpired:
-        return f"❌ 执行超时（>{timeout} 秒），已强制终止"
     except Exception as e:
         return f"❌ 执行失败：{e}"
     finally:
@@ -444,10 +413,12 @@ def run_python(code: str, timeout: int = 30) -> str:
         f"cd /workspace && python /tmp/_agent_run.py"
     )
 
-    res = sandbox.run_script(script, timeout, runtime.get_project_root())
+    res = sandbox.run_script(
+        script, timeout, runtime.get_project_root(), cancel_event=runtime.get_cancel_event()
+    )
     if not res.ran:
         # 只有用户显式设置 AGENT_ALLOW_HOST_EXEC=1 才可能走到这里
-        return _host_run_python(code, timeout)
+        return _host_run_python(code, timeout, cancel_event=runtime.get_cancel_event())
     return _truncate(res.output, 5000)
 
 
@@ -501,34 +472,21 @@ def run_command(cmd: str, timeout: int = 15) -> str:
     res = sandbox.run_script(script, timeout, runtime.get_project_root())
     if not res.ran:
         # 只有显式开启 AGENT_ALLOW_HOST_EXEC 才会走到这里
-        return _host_run_shell(cmd, timeout)
+        return _host_run_shell(cmd, timeout, cancel_event=runtime.get_cancel_event())
     return _truncate(res.output, 3000)
 
 
-def _host_run_shell(cmd: str, timeout: int) -> str:
+def _host_run_shell(cmd: str, timeout: int, cancel_event=None) -> str:
     """宿主机兜底执行 shell 命令（仅在 AGENT_ALLOW_HOST_EXEC=1 时使用）。"""
     import runtime
 
-    try:
-        r = subprocess.run(
-            cmd,
-            shell=True,
-            cwd=runtime.get_project_root(),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        out = ""
-        if r.stdout:
-            out += f"【stdout】\n{r.stdout}"
-        if r.stderr:
-            out += f"\n【stderr】\n{r.stderr}"
-        out += f"\n\n【退出码】{r.returncode}"
-        return sandbox.HOST_EXEC_NOTICE + _truncate(out, 3000)
-    except subprocess.TimeoutExpired:
-        return f"❌ 执行超时（>{timeout} 秒），已强制终止"
-    except Exception as e:
-        return f"❌ 执行失败：{e}"
+    out = _run_subprocess(
+        ["sh", "-c", cmd],
+        runtime.get_project_root(),
+        timeout,
+        cancel_event=cancel_event,
+    )
+    return sandbox.HOST_EXEC_NOTICE + _truncate(out, 3000)
 
 
 # 只读命令前缀（不需要确认，直接执行）
@@ -929,7 +887,6 @@ def multi_edit(edits: list) -> str:
     edits: [{"path": "...", "old_text": "...", "new_text": "..."}, ...]
     """
     import shutil
-    import time
 
     if not isinstance(edits, list) or not edits:
         return "❌ edits 必须是非空列表"
@@ -972,20 +929,17 @@ def multi_edit(edits: list) -> str:
         pending[abs_path] = content.replace(old_text, new_text, 1)
 
     # ---------- 阶段 2：统一落盘（带备份 + 失败回滚） ----------
-    os.makedirs(TRASH_DIR, exist_ok=True)
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
     written = []  # [(backup_path, abs_path)]
     try:
         for abs_path, new_content in pending.items():
-            backup = os.path.join(
-                TRASH_DIR, f"{timestamp}_multiedit_{os.path.basename(abs_path)}"
-            )
-            shutil.copy2(abs_path, backup)
+            backup = trash.backup_file(abs_path, kind="multiedit")
             with open(abs_path, "w", encoding="utf-8") as f:
                 f.write(new_content)
             written.append((backup, abs_path))
     except Exception as e:
         for backup, abs_path in written:
+            if not backup:
+                continue
             try:
                 shutil.copy2(backup, abs_path)
             except Exception:
@@ -995,7 +949,7 @@ def multi_edit(edits: list) -> str:
     lines = [f"📝 multi_edit 成功（{len(edits)} 处编辑 / {len(pending)} 个文件）："]
     for abs_path in pending:
         lines.append(f"  ✓ {abs_path}")
-    lines.append(f"  备份目录：.trash/（前缀 {timestamp}_multiedit_）")
+    lines.append("  每个文件的改动前版本都在回收站里，可在界面「回收站」一键恢复")
     return "\n".join(lines)
 
 
@@ -1014,35 +968,83 @@ def _run_git_local(args: list) -> str:
     if not os.path.isdir(root):
         return f"❌ 项目目录不存在：{root}"
 
-    res = sandbox.run_argv(["git", *args], 10, root, allow_host_fallback=True)
+    res = sandbox.run_argv(
+        ["git", *args],
+        10,
+        root,
+        allow_host_fallback=True,
+        cancel_event=runtime.get_cancel_event(),
+    )
     if res.ran:
         return res.output
 
     # 回退：宿主机执行（参数列表，shell=False）
     return sandbox.HOST_EXEC_NOTICE + _run_subprocess(
-        ["git", "-C", root, *args], root, 10
+        ["git", "-C", root, *args],
+        root,
+        10,
+        cancel_event=runtime.get_cancel_event(),
     )
 
 
-def _run_subprocess(cmd: list, cwd: str, timeout: int) -> str:
-    """统一的子进程执行 + 输出拼装（shell=False，参数列表）。"""
-    import subprocess
+def _run_subprocess(cmd: list, cwd: str, timeout: int, cancel_event=None) -> str:
+    """统一的子进程执行 + 输出拼装（shell=False，参数列表）。
+
+    cancel_event 置位后**立刻** kill 子进程并返回，而不是等它自然跑完
+    —— run_tests 最长 120 秒，让用户干等体验很差。
+    输出重定向到临时文件而不是 PIPE，避免输出超过管道缓冲区时死锁。
+    """
+    import tempfile
+    import time
 
     try:
-        r = subprocess.run(
-            cmd, cwd=cwd, shell=False, capture_output=True, text=True, timeout=timeout
-        )
-        out = ""
-        if r.stdout:
-            out += r.stdout
-        if r.stderr:
-            out += "\n【stderr】\n" + r.stderr
-        out += f"\n【退出码】{r.returncode}"
-        return out
-    except FileNotFoundError:
-        return f"❌ 命令不存在：{cmd[0]}"
-    except subprocess.TimeoutExpired:
-        return f"❌ 执行超时（>{timeout} 秒）"
+        with tempfile.TemporaryFile("w+", encoding="utf-8") as fo, tempfile.TemporaryFile(
+            "w+", encoding="utf-8"
+        ) as fe:
+            try:
+                proc = subprocess.Popen(cmd, cwd=cwd, stdout=fo, stderr=fe, text=True)
+            except FileNotFoundError:
+                return f"❌ 命令不存在：{cmd[0]}"
+
+            deadline = time.monotonic() + timeout
+            cancelled = False
+            timed_out = False
+            while proc.poll() is None:
+                if cancel_event is not None and cancel_event.is_set():
+                    cancelled = True
+                    break
+                if time.monotonic() > deadline:
+                    timed_out = True
+                    break
+                time.sleep(0.1)
+
+            if cancelled or timed_out:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                try:
+                    proc.wait(timeout=10)
+                except Exception:
+                    pass
+
+            rc = proc.returncode
+            fo.seek(0)
+            fe.seek(0)
+            out, err = fo.read(), fe.read()
+
+        if cancelled:
+            return "⏹ 已按用户请求中断执行" + (f"\n（中断前输出）\n{out[-500:]}" if out else "")
+        if timed_out:
+            return f"❌ 执行超时（>{timeout} 秒），已强制终止"
+
+        text = ""
+        if out:
+            text += out
+        if err:
+            text += "\n【stderr】\n" + err
+        text += f"\n【退出码】{rc}"
+        return text
     except Exception as e:
         return f"❌ 执行失败：{e}"
 
@@ -1085,12 +1087,15 @@ def run_tests(path: str = "") -> str:
             return f"❌ 测试路径必须位于项目目录内：{path}"
 
     def _run(cmd: list) -> str:
+        ev = runtime.get_cancel_event()
         if use_sandbox:
-            res = sandbox.run_argv(cmd, 120, root, allow_host_fallback=True)
+            res = sandbox.run_argv(cmd, 120, root, allow_host_fallback=True, cancel_event=ev)
             if res.ran:
                 return res.output
-            return sandbox.HOST_EXEC_NOTICE + _run_subprocess(cmd, root, 120)
-        return _run_subprocess(cmd, root, 120)
+            return sandbox.HOST_EXEC_NOTICE + _run_subprocess(
+                cmd, root, 120, cancel_event=ev
+            )
+        return _run_subprocess(cmd, root, 120, cancel_event=ev)
 
     has_package_json = os.path.exists(os.path.join(root, "package.json"))
     has_cargo = os.path.exists(os.path.join(root, "Cargo.toml"))

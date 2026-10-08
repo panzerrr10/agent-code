@@ -17,7 +17,7 @@ import pytest
 
 import agent
 import runtime
-import tools
+import trash
 
 HOME = os.path.expanduser("~")
 
@@ -25,7 +25,7 @@ HOME = os.path.expanduser("~")
 @pytest.fixture
 def project(monkeypatch):
     d = tempfile.mkdtemp(prefix=".agentcode-confirm-", dir=HOME)
-    monkeypatch.setattr(tools, "TRASH_DIR", os.path.join(d, ".trash"))
+    monkeypatch.setattr(trash, "TRASH_DIR", os.path.join(d, ".trash"))
     monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
     runtime.reset_all()
     runtime.set_session_id("confirm-sess")

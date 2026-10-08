@@ -220,6 +220,16 @@ def clear_run(session_id=None):
         _cancel_events.pop(session_key(session_id), None)
 
 
+def get_cancel_event(session_id=None):
+    """取当前会话的取消标志（没有在运行的任务时返回 None）。
+
+    工具层用它做「工具级取消」：把 event 传进子进程 / 沙箱执行循环，
+    用户点停止后立刻终止正在跑的命令，而不是等它自然结束
+    （run_tests 最长 120 秒，等待体验很差）。
+    """
+    return _cancel_events.get(session_key(session_id))
+
+
 # ===== 生命周期维护 =====
 
 def clear_session(session_id):

@@ -10,6 +10,8 @@ import os
 import shlex
 import shutil
 import subprocess
+import threading
+import time
 
 import pytest
 
@@ -104,7 +106,7 @@ def test_docker_cmd_mounts_project_root_and_hardens(tmp_path):
 def test_run_argv_quotes_every_argument(monkeypatch, tmp_path):
     captured = {}
 
-    def fake_run_script(script, timeout, root, allow_host_fallback=False):
+    def fake_run_script(script, timeout, root, allow_host_fallback=False, cancel_event=None):
         captured["script"] = script
         return sandbox.SandboxResult(True, "ok")
 
@@ -198,3 +200,65 @@ def test_real_sandbox_runs_git(tmp_path):
     res = sandbox.run_script("git --version", 60, str(tmp_path))
     assert res.ran is True
     assert "git version" in res.output
+
+
+# ============ 工具级取消 + 容器清理 ============
+
+
+def _leftover_exec_containers():
+    """本模块起的临时容器名前缀是 agent-exec-，返回残留列表。"""
+    r = subprocess.run(
+        ["docker", "ps", "--format", "{{.Names}}"], capture_output=True, text=True
+    )
+    return [n for n in r.stdout.split() if n.startswith("agent-exec-")]
+
+
+@pytest.mark.skipif(not shutil.which("sleep"), reason="需要 sleep 命令")
+def test_host_subprocess_is_cancelled_promptly(tmp_path):
+    """宿主机子进程（run_tests / git 回退路径）应能被打断，而不是干等超时。"""
+    ev = threading.Event()
+    threading.Timer(0.5, ev.set).start()
+
+    t0 = time.time()
+    out = tools._run_subprocess(["sleep", "30"], str(tmp_path), 60, cancel_event=ev)
+    elapsed = time.time() - t0
+
+    assert "中断" in out
+    assert elapsed < 10, f"取消没有及时生效，耗时 {elapsed:.1f}s"
+
+
+@pytest.mark.skipif(not shutil.which("sleep"), reason="需要 sleep 命令")
+def test_host_subprocess_still_times_out(tmp_path):
+    t0 = time.time()
+    out = tools._run_subprocess(["sleep", "30"], str(tmp_path), 2)
+    elapsed = time.time() - t0
+    assert "超时" in out
+    assert elapsed < 10, f"超时没有生效，耗时 {elapsed:.1f}s"
+
+
+@pytest.mark.skipif(not _real_docker_ready(), reason="需要 Docker 与沙箱镜像")
+@pytest.mark.skipif(not shutil.which("sleep"), reason="需要 sleep 命令")
+def test_real_sandbox_cancel_kills_container(tmp_path):
+    """点停止后：容器必须被真正删除，而不是只 kill 掉 docker 客户端。"""
+    ev = threading.Event()
+    threading.Timer(1.0, ev.set).start()
+
+    t0 = time.time()
+    res = sandbox.run_script("sleep 60", 120, str(tmp_path), cancel_event=ev)
+    elapsed = time.time() - t0
+
+    assert res.ran is True
+    assert "中断" in res.output
+    assert elapsed < 15, f"中断没有及时生效，耗时 {elapsed:.1f}s"
+    assert _leftover_exec_containers() == [], "取消后容器仍残留在 docker ps 里"
+
+
+@pytest.mark.skipif(not _real_docker_ready(), reason="需要 Docker 与沙箱镜像")
+@pytest.mark.skipif(not shutil.which("sleep"), reason="需要 sleep 命令")
+def test_real_sandbox_timeout_leaves_no_container(tmp_path):
+    """超时同样要清理容器 —— 修复前会一直残留占资源，且提示文案还谎称已终止。"""
+    res = sandbox.run_script("sleep 60", 3, str(tmp_path))
+    assert res.ran is True
+    assert "超时" in res.output
+    assert "已强制终止并清理" in res.output, "提示应说明容器已被强制清理"
+    assert _leftover_exec_containers() == [], "超时后容器仍残留在 docker ps 里"

@@ -925,6 +925,135 @@
             cursor: not-allowed;
         }
 
+        /* 回收站面板 */
+        .trash-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, .45);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+        }
+
+        .trash-panel {
+            width: min(780px, 92vw);
+            max-height: 82vh;
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, .28);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .trash-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 18px;
+            border-bottom: 1px solid #eef0f3;
+            font-weight: 600;
+        }
+
+        .trash-sub {
+            font-weight: 400;
+            font-size: 12px;
+            color: #6b7280;
+            margin-left: 6px;
+        }
+
+        .trash-hint {
+            padding: 10px 18px;
+            font-size: 12px;
+            color: #6b7280;
+            background: #f9fafb;
+            border-bottom: 1px solid #eef0f3;
+            line-height: 1.6;
+        }
+
+        .trash-list {
+            overflow: auto;
+            padding: 6px 12px 14px;
+        }
+
+        .trash-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 8px;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        .trash-item:last-child {
+            border-bottom: none;
+        }
+
+        .trash-meta {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .trash-path {
+            font-family: ui-monospace, Menlo, Consolas, monospace;
+            font-size: 12px;
+            color: #111827;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .trash-info {
+            font-size: 11px;
+            color: #9ca3af;
+            margin-top: 2px;
+        }
+
+        .trash-kind {
+            font-size: 11px;
+            padding: 1px 6px;
+            border-radius: 999px;
+            background: #eef2ff;
+            color: #4338ca;
+            white-space: nowrap;
+        }
+
+        .trash-btn {
+            font-size: 12px;
+            padding: 5px 10px;
+            border-radius: 6px;
+            border: 1px solid #e5e7eb;
+            background: #fff;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .trash-btn:hover {
+            background: #f9fafb;
+        }
+
+        .trash-btn.restore {
+            background: #10b981;
+            color: #fff;
+            border-color: #10b981;
+        }
+
+        .trash-btn.restore:hover {
+            background: #059669;
+        }
+
+        .trash-btn:disabled {
+            opacity: .5;
+            cursor: not-allowed;
+        }
+
+        .trash-empty {
+            padding: 28px;
+            text-align: center;
+            color: #9ca3af;
+            font-size: 13px;
+        }
+
         /* 任务计划面板 */
         .plan-panel {
             background: #fff8e1;
@@ -1492,6 +1621,17 @@
                     <input type="file" id="fileInput" accept=".txt,.md,.pdf,.docx" style="display: none;"
                         onchange="handleFileUpload(event)">
                 </div>
+
+                <!-- 回收站入口 -->
+                <div class="doc-section">
+                    <div class="doc-header">
+                        <span>🗑️ 回收站</span>
+                        <button class="icon-btn-mini" onclick="openTrash()" title="查看备份并一键恢复">打开</button>
+                    </div>
+                    <div class="doc-list" id="trashSummary" style="font-size:12px;color:#6b7280;padding:2px 6px;">
+                        点击「打开」查看并恢复
+                    </div>
+                </div>
             </div>
             <!-- 搜索框 -->
             <div class="search-box" id="searchBox" style="display:none;">
@@ -1592,6 +1732,21 @@
                         style="display: none;">⏹ 停止</button>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- 回收站面板 -->
+    <div class="trash-overlay" id="trashOverlay" style="display: none;" onclick="if(event.target===this) closeTrash()">
+        <div class="trash-panel">
+            <div class="trash-head">
+                <span>🗑️ 回收站 <span class="trash-sub" id="trashSub"></span></span>
+                <button class="icon-btn" onclick="closeTrash()" title="关闭">✕</button>
+            </div>
+            <div class="trash-hint">
+                每次覆盖写入 / 编辑 / 批量编辑 / 删除前都会在这里留一份备份。
+                点「恢复」会写回它原来的路径；若目标已存在，会先把现状也备份一份，所以恢复本身也能撤回。
+            </div>
+            <div class="trash-list" id="trashList"></div>
         </div>
     </div>
     <script>
@@ -1836,6 +1991,18 @@
                                     ? "⏹ 已停止本次任务，上方为中断前已产出的内容"
                                     : "⏹ 已停止本次任务";
                                 ctx.bubble.parentElement.appendChild(stopTip);
+                                // 服务端已把断点存进 pending_state，这里给一个「继续」入口
+                                const contBtn = document.createElement("button");
+                                contBtn.className = "trash-btn restore";
+                                contBtn.style.marginTop = "6px";
+                                contBtn.textContent = "▶ 从这里继续";
+                                contBtn.onclick = () => {
+                                    contBtn.remove();
+                                    stopTip.textContent = "▶ 正在从中断处继续…";
+                                    ctx.confirmToken = null;   // 中断续跑不需要确认令牌
+                                    resumeRun(ctx);
+                                };
+                                ctx.bubble.parentElement.appendChild(contBtn);
                             } else if (ev.type === "error") {
                                 ctx.bubble.style.color = "#b91c1c";
                                 ctx.bubble.textContent = "⚠️ " + ev.content;
@@ -2764,6 +2931,113 @@
         });
 
         // ============ 执行任务 ============
+        // ===== 回收站（一键恢复）=====
+        async function loadTrashSummary() {
+            const el = document.getElementById("trashSummary");
+            if (!el) return;
+            try {
+                const res = await fetch("/api/trash");
+                const j = await res.json();
+                const n = (j.entries || []).length;
+                el.textContent = n
+                    ? `共 ${n} 份备份（${(j.total_size / 1024).toFixed(1)} KB）`
+                    : "暂无备份";
+            } catch (e) {
+                el.textContent = "读取失败";
+            }
+        }
+
+        function closeTrash() {
+            const o = document.getElementById("trashOverlay");
+            if (o) o.style.display = "none";
+        }
+
+        async function openTrash() {
+            const o = document.getElementById("trashOverlay");
+            if (o) o.style.display = "flex";
+            await renderTrash();
+        }
+
+        async function renderTrash() {
+            const list = document.getElementById("trashList");
+            const sub = document.getElementById("trashSub");
+            list.innerHTML = `<div class="trash-empty">加载中…</div>`;
+            try {
+                const res = await fetch("/api/trash");
+                const j = await res.json();
+                const entries = j.entries || [];
+                sub.textContent = entries.length
+                    ? `共 ${entries.length} 份 · ${(j.total_size / 1024).toFixed(1)} KB`
+                    : "";
+                if (!entries.length) {
+                    list.innerHTML = `<div class="trash-empty">回收站是空的</div>`;
+                    return;
+                }
+                // 用 data-* + 事件委托，避免把文件名拼进 onclick 造成注入
+                list.innerHTML = entries.map(e => `
+                    <div class="trash-item">
+                        <span class="trash-kind">${escapeHtml(e.kind_label)}</span>
+                        <div class="trash-meta">
+                            <div class="trash-path" title="${escapeHtml(e.original_path || e.name)}">
+                                ${escapeHtml(e.original_path || e.name)}
+                            </div>
+                            <div class="trash-info">${escapeHtml(e.mtime)} · ${(e.size / 1024).toFixed(1)} KB${e.restorable ? "" : " · 原始路径未知，无法一键恢复"}</div>
+                        </div>
+                        <button class="trash-btn restore" data-action="restore" data-id="${escapeHtml(e.id)}"
+                            ${e.restorable ? "" : "disabled"}>恢复</button>
+                        <button class="trash-btn" data-action="purge" data-id="${escapeHtml(e.id)}">彻底删除</button>
+                    </div>`).join("");
+            } catch (e) {
+                list.innerHTML = `<div class="trash-empty">加载失败：${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        async function restoreTrashEntry(id, btn) {
+            if (!confirm("确定把这份备份恢复到它原来的路径吗？")) return;
+            btn.disabled = true;
+            btn.textContent = "恢复中…";
+            try {
+                const res = await fetch("/api/trash/restore", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ id }),
+                });
+                const j = await res.json();
+                alert(j.message || (j.ok ? "已恢复" : "恢复失败"));
+            } catch (e) {
+                alert("恢复失败：" + e.message);
+            }
+            await renderTrash();
+            await loadTrashSummary();
+        }
+
+        async function purgeTrashEntry(id, btn) {
+            if (!confirm("彻底删除这条备份？此操作不可恢复。")) return;
+            btn.disabled = true;
+            btn.textContent = "删除中…";
+            try {
+                const res = await fetch(`/api/trash/${encodeURIComponent(id)}`, { method: "DELETE" });
+                const j = await res.json();
+                if (!j.ok) alert(j.message || "删除失败");
+            } catch (e) {
+                alert("删除失败：" + e.message);
+            }
+            await renderTrash();
+            await loadTrashSummary();
+        }
+
+        (function bindTrashActions() {
+            const list = document.getElementById("trashList");
+            if (!list) return;
+            list.addEventListener("click", (ev) => {
+                const btn = ev.target.closest("button[data-action]");
+                if (!btn) return;
+                const id = btn.dataset.id;
+                if (btn.dataset.action === "restore") restoreTrashEntry(id, btn);
+                else if (btn.dataset.action === "purge") purgeTrashEntry(id, btn);
+            });
+        })();
+
         // ===== 任务中断 =====
         // 依据「当前会话是否在运行」统一切换 执行/停止 按钮，
         // 避免在多处各改一遍导致按钮状态不同步
@@ -2967,6 +3241,18 @@
                                     ? "⏹ 已停止本次任务，上方为中断前已产出的内容"
                                     : "⏹ 已停止本次任务";
                                 ctx.bubble.parentElement.appendChild(stopTip);
+                                // 服务端已把断点存进 pending_state，这里给一个「继续」入口
+                                const contBtn = document.createElement("button");
+                                contBtn.className = "trash-btn restore";
+                                contBtn.style.marginTop = "6px";
+                                contBtn.textContent = "▶ 从这里继续";
+                                contBtn.onclick = () => {
+                                    contBtn.remove();
+                                    stopTip.textContent = "▶ 正在从中断处继续…";
+                                    ctx.confirmToken = null;   // 中断续跑不需要确认令牌
+                                    resumeRun(ctx);
+                                };
+                                ctx.bubble.parentElement.appendChild(contBtn);
                             } else if (ev.type === "error") {
                                 ctx.bubble.style.color = "#b91c1c";
                                 ctx.bubble.textContent = "⚠️ " + ev.content;
@@ -3013,6 +3299,7 @@
 
         loadSessions();
         loadDocuments();
+        loadTrashSummary();
         // ===== 输入框自动长高 =====
         const inputEl = document.getElementById("task");
 

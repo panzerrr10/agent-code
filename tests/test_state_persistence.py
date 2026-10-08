@@ -18,6 +18,7 @@ import agent
 import db
 import runtime
 import tools
+import trash
 
 HOME = os.path.expanduser("~")
 
@@ -206,7 +207,7 @@ def _llm(chunks):
 @pytest.fixture
 def project(monkeypatch):
     d = tempfile.mkdtemp(prefix=".agentcode-persist-", dir=HOME)
-    monkeypatch.setattr(tools, "TRASH_DIR", os.path.join(d, ".trash"))
+    monkeypatch.setattr(trash, "TRASH_DIR", os.path.join(d, ".trash"))
     monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
     yield d
     shutil.rmtree(d, ignore_errors=True)

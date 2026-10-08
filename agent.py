@@ -308,11 +308,56 @@ def run_agent_stream(
     total_tokens = 0
     failure_tracker = {}
 
+    def _persist_pending(
+        _step, _current_ids=None, _processed_ids=None, _pending_tool=None, _confirm_token=None
+    ):
+        """把当前对话状态存成「可续跑」的 pending_state。
+
+        - `_current_ids` / `_processed_ids`：当前这条 assistant 消息的 tool_call id 全集
+          与其「已处理」子集。传入时会把未处理的 tool_calls 裁掉——否则续跑时
+          会出现「assistant 带 tool_calls 却没有对应 tool 消息」的悬空，LLM 直接 400。
+          不传表示 messages 本身已停在安全边界（两步之间、或流式输出被打断处）。
+        - `_pending_tool`：挂起等待确认的工具。**为空**表示这是「用户主动中断后的
+          续跑点」——续跑时不需要一次性令牌，因为它不会直接执行任何危险操作。
+        """
+        import copy as _copy
+
+        _msgs = _copy.deepcopy(messages)
+        if _current_ids is not None:
+            _cur = set(_current_ids)
+            _proc = set(_processed_ids or [])
+            _kept = []
+            for _m in _msgs:
+                if _m.get("role") == "assistant" and _m.get("tool_calls"):
+                    _tcs = [
+                        _t
+                        for _t in _m["tool_calls"]
+                        # 之前步骤的 tool_calls 原样保留；当前这条只留已处理的
+                        if _t["id"] not in _cur or _t["id"] in _proc
+                    ]
+                    if _tcs:
+                        _new_m = dict(_m)
+                        _new_m["tool_calls"] = _tcs
+                        _kept.append(_new_m)
+                    # 一个都不剩就整条丢弃，避免悬空 tool_calls
+                else:
+                    _kept.append(_m)
+            _msgs = _kept
+
+        _state = {"messages": _msgs, "step": _step, "task": user_task}
+        if _pending_tool:
+            _state["pending_tool"] = _pending_tool
+            _state["confirm_token"] = _confirm_token
+        runtime.clear_pending_state()  # 先清旧的，避免多轮累积
+        runtime.set_pending_state(_state)
+        return _confirm_token
+
     _start_step = _pending.get("step", 0) if _resume and _pending else 0
     for step in range(_start_step, max_steps):
-        # 取消检查点 1：进入新的一步之前
+        # 取消检查点 1：进入新的一步之前（此处 messages 停在安全边界，可直接续跑）
         if runtime.is_cancelled():
-            yield {"type": "cancelled", "content": "任务已停止"}
+            _persist_pending(step)
+            yield {"type": "cancelled", "content": "任务已停止（可从断点继续）"}
             yield {"type": "done"}
             return
         try:
@@ -350,7 +395,9 @@ def run_agent_stream(
                         stream.close()
                     except Exception:
                         pass
-                    yield {"type": "cancelled", "content": "任务已停止"}
+                    # 此刻本轮 assistant 消息还没入 messages，状态是干净的
+                    _persist_pending(step)
+                    yield {"type": "cancelled", "content": "任务已停止（可从断点继续）"}
                     yield {"type": "done"}
                     return
                 # 处理 usage（最后一个 chunk 带）
@@ -487,50 +534,26 @@ def run_agent_stream(
             def _save_pending_with_processed(
                 _idx, _tc, _func_name, _func_args, _tc_ids=_all_tc_ids, _step=step
             ):
-                import runtime as _rt_save
-
-                _current_ids = set(_tc_ids)
-                _processed_ids = set(_tc_ids[: _idx + 1])
-                _modified_messages = []
-                for _m in messages:
-                    if _m.get("role") == "assistant" and _m.get("tool_calls"):
-                        _filtered_tcs = [
-                            _t
-                            for _t in _m["tool_calls"]
-                            # 之前步骤的 tool_calls（不属于当前 assistant）→ 保留
-                            # 当前 assistant 的 tool_calls → 只保留已处理的
-                            if _t["id"] not in _current_ids
-                            or _t["id"] in _processed_ids
-                        ]
-                        if _filtered_tcs:
-                            _new_m = dict(_m)
-                            _new_m["tool_calls"] = _filtered_tcs
-                            _modified_messages.append(_new_m)
-                    else:
-                        _modified_messages.append(_m)
-                _rt_save.clear_pending_state()  # 【修复 Bug1】先清空旧的，避免多轮累积
-                # 服务端签发一次性确认令牌：只有带着它回来，才允许执行下面这个工具。
-                # 放在服务端状态里，客户端拿不到就无法伪造「用户已确认」。
-                _confirm_token = secrets.token_urlsafe(32)
-                _rt_save.set_pending_state(
-                    {
-                        "messages": _modified_messages,
-                        "step": _step,
-                        "task": user_task,
-                        "pending_tool": {
-                            "id": _tc.id,
-                            "name": _func_name,
-                            "args": _func_args,
-                        },
-                        "confirm_token": _confirm_token,
-                    }
+                """挂起等待人工确认：保留「已处理」的 tool_calls，并签发一次性令牌。"""
+                return _persist_pending(
+                    _step,
+                    _current_ids=_tc_ids,
+                    _processed_ids=_tc_ids[: _idx + 1],
+                    _pending_tool={"id": _tc.id, "name": _func_name, "args": _func_args},
+                    _confirm_token=secrets.token_urlsafe(32),
                 )
-                return _confirm_token
 
             for idx, tc in enumerate(assistant_msg.tool_calls):
-                # 取消检查点 3：执行任何工具之前（避免「已点停止却还在写文件」）
+                # 取消检查点 3：执行任何工具之前
+                # 当前这条 assistant 已入 messages，必须裁掉「还没执行」的 tool_calls，
+                # 否则续跑时悬空 → 400
                 if runtime.is_cancelled():
-                    yield {"type": "cancelled", "content": "任务已停止"}
+                    _persist_pending(
+                        step,
+                        _current_ids=_all_tc_ids,
+                        _processed_ids=_all_tc_ids[:idx],
+                    )
+                    yield {"type": "cancelled", "content": "任务已停止（可从断点继续）"}
                     yield {"type": "done"}
                     return
                 func_name = tc.function.name

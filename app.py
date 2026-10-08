@@ -43,6 +43,15 @@ def _pack_user_content(task: str, images=None) -> str:
     return task
 
 
+def _sse_error(message: str) -> str:
+    """构造一条 SSE 错误事件。"""
+    return (
+        "data: "
+        + json.dumps({"type": "error", "content": message}, ensure_ascii=False)
+        + "\n\n"
+    )
+
+
 def _build_evidence(tool_events) -> str:
     """把 Executor 的工具调用记录压成给 Reviewer 的证据摘要。
 
@@ -275,23 +284,23 @@ def run():
 
         _rt_run.set_session_id(session_id)
         try:
-            # 【服务端强制确认】续跑必须先出示服务端签发的一次性令牌。
-            # 只带 resume=true 而没有令牌 → 拒绝，挂起的危险操作不会被执行。
-            if resume and not _rt_run.verify_and_consume_confirm_token(
-                session_id, data.get("confirm_token")
-            ):
-                yield (
-                    "data: "
-                    + json.dumps(
-                        {
-                            "type": "error",
-                            "content": "确认令牌无效或已过期，请重新发起任务",
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n\n"
-                )
-                return
+            # 续跑分两种，门控不同：
+            #  A. 挂起等待确认（pending 里有 pending_tool）→ 必须出示一次性确认令牌
+            #  B. 用户主动中断后的「继续」（pending 里没有 pending_tool）→ 免令牌，
+            #     因为它不会直接执行挂起的危险操作；后续危险操作仍会重新走确认流程
+            if resume:
+                _state = _rt_run.get_pending_state(session_id)
+                if not _state:
+                    yield _sse_error("没有可续跑的任务（可能已完成、已过期，或被新任务覆盖）")
+                    return
+                if _state.get("pending_tool") and not _rt_run.verify_and_consume_confirm_token(
+                    session_id, data.get("confirm_token")
+                ):
+                    yield _sse_error("确认令牌无效或已过期，请重新发起任务")
+                    return
+            else:
+                # 新任务开始：清掉上一轮残留的续跑点，避免「继续」接到旧状态
+                _rt_run.clear_pending_state(session_id)
 
             # 保存用户任务（图片以 Base64 data URL 一起入库，刷新后历史仍可回显）
             images = data.get("images") or []   # 多模态图片（data URL 数组）
@@ -703,6 +712,45 @@ def remove_document(doc_id):
         return jsonify({"error": str(e)}), 500
 
 
+# ============ 回收站（一键恢复）============
+@app.route("/api/trash", methods=["GET"])
+def api_trash_list():
+    """列出回收站里的备份（含原始路径，可一键恢复）。"""
+    import trash
+
+    entries = trash.list_entries()
+    return jsonify(
+        {
+            "ok": True,
+            "entries": entries,
+            "total_size": sum(e["size"] for e in entries),
+        }
+    )
+
+
+@app.route("/api/trash/restore", methods=["POST"])
+def api_trash_restore():
+    """把某条备份恢复到它的原始路径。"""
+    import trash
+
+    data = request.json or {}
+    ok, message = trash.restore(data.get("id", ""))
+    if ok:
+        return jsonify({"ok": True, "message": message})
+    return jsonify({"ok": False, "message": message}), 400
+
+
+@app.route("/api/trash/<path:entry_id>", methods=["DELETE"])
+def api_trash_purge(entry_id):
+    """彻底删除某条回收站记录（不可恢复）。"""
+    import trash
+
+    ok, message = trash.purge(entry_id)
+    if ok:
+        return jsonify({"ok": True, "message": message})
+    return jsonify({"ok": False, "message": message}), 400
+
+
 @app.route("/run_multi", methods=["POST"])
 def run_multi():
     """多 Agent 协作模式：Planner 规划 → Executor 执行 → Reviewer 审查"""
@@ -723,22 +771,19 @@ def run_multi():
 
         _rt_multi.set_session_id(session_id)
         try:
-            # 【服务端强制确认】与 /run 一致：续跑必须出示一次性确认令牌
-            if resume and not _rt_multi.verify_and_consume_confirm_token(
-                session_id, data.get("confirm_token")
-            ):
-                yield (
-                    "data: "
-                    + json.dumps(
-                        {
-                            "type": "error",
-                            "content": "确认令牌无效或已过期，请重新发起任务",
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n\n"
-                )
-                return
+            # 续跑门控与 /run 一致：挂起确认要令牌，纯「继续」免令牌
+            if resume:
+                _state = _rt_multi.get_pending_state(session_id)
+                if not _state:
+                    yield _sse_error("没有可续跑的任务（可能已完成、已过期，或被新任务覆盖）")
+                    return
+                if _state.get("pending_tool") and not _rt_multi.verify_and_consume_confirm_token(
+                    session_id, data.get("confirm_token")
+                ):
+                    yield _sse_error("确认令牌无效或已过期，请重新发起任务")
+                    return
+            else:
+                _rt_multi.clear_pending_state(session_id)
 
             # 批次 6：三角色各自可以独立选 provider，默认继承 executor 的
             executor_provider_id = data.get("provider_id") or DEFAULT_PROVIDER

@@ -17,7 +17,7 @@ import pytest
 import agent
 import auth
 import runtime
-import tools
+import trash
 
 HOME = os.path.expanduser("~")
 
@@ -43,7 +43,7 @@ def _sse(body: str):
 @pytest.fixture
 def project(monkeypatch):
     d = tempfile.mkdtemp(prefix=".agentcode-auth-", dir=HOME)
-    monkeypatch.setattr(tools, "TRASH_DIR", os.path.join(d, ".trash"))
+    monkeypatch.setattr(trash, "TRASH_DIR", os.path.join(d, ".trash"))
     monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
     runtime.reset_all()
     runtime.set_session_id(None)

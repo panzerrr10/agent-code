@@ -14,6 +14,7 @@ import pytest
 
 import runtime
 import tools
+import trash
 
 HOME = os.path.expanduser("~")
 PY_SAMPLE = '''
@@ -36,7 +37,7 @@ def proj(monkeypatch):
     同时把 TRASH_DIR 指到临时目录内，避免测试往仓库的 data/.trash 里堆备份。
     """
     d = tempfile.mkdtemp(prefix=".agentcode-test-", dir=HOME)
-    monkeypatch.setattr(tools, "TRASH_DIR", os.path.join(d, ".trash"))
+    monkeypatch.setattr(trash, "TRASH_DIR", os.path.join(d, ".trash"))
     runtime.reset_all()
     runtime.set_session_id("tools-test")
     runtime.set_project_root(d)
@@ -74,7 +75,7 @@ def test_write_file_backs_up_original(proj):
     assert "已写入" in r
     assert "NEW" in tools.read_file("f.txt")
     assert "OLD" not in tools.read_file("f.txt")
-    backups = os.listdir(tools.TRASH_DIR)
+    backups = os.listdir(trash.TRASH_DIR)
     assert any("backup_f.txt" in b for b in backups), backups
 
 
@@ -84,14 +85,14 @@ def test_edit_file_requires_unique_match_and_backs_up(proj):
     assert "不匹配" in tools.edit_file("e.txt", "NOT_THERE", "z")
     assert "已替换" in tools.edit_file("e.txt", "y", "Y")
     assert "Y" in tools.read_file("e.txt")
-    assert any("edit_e.txt" in b for b in os.listdir(tools.TRASH_DIR))
+    assert any("edit_e.txt" in b for b in os.listdir(trash.TRASH_DIR))
 
 
 def test_delete_moves_to_trash_and_refuses_directory(proj):
     tools.create_file("d.txt", "x")
     assert "回收站" in tools.delete_file("d.txt")
     assert not os.path.exists(os.path.join(proj, "d.txt"))
-    assert any("d.txt" in f for f in os.listdir(tools.TRASH_DIR))
+    assert any("d.txt" in f for f in os.listdir(trash.TRASH_DIR))
 
     os.makedirs(os.path.join(proj, "sub"), exist_ok=True)
     assert "不能删除目录" in tools.delete_file("sub")

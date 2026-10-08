@@ -31,6 +31,9 @@ import logging
 import os
 import shlex
 import subprocess
+import tempfile
+import time
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -99,11 +102,18 @@ class SandboxResult:
         self.output = output
 
 
-def _build_docker_cmd(project_root: str, script: str) -> list[str]:
+def _build_docker_cmd(
+    project_root: str, script: str, name: str | None = None
+) -> list[str]:
     cmd = [
         "docker",
         "run",
         "--rm",
+    ]
+    if name:
+        # 唯一名字，便于超时/中断时 docker rm -f 精准清理
+        cmd += ["--name", name]
+    cmd += [
         "--network",
         NETWORK,
         "--memory",
@@ -139,12 +149,27 @@ def _build_docker_cmd(project_root: str, script: str) -> list[str]:
     return cmd
 
 
+def _kill_container(name: str) -> None:
+    """强制删除容器（超时 / 用户中断时用）。
+
+    必须显式 `docker rm -f`：`subprocess` 只能 kill 掉 docker **客户端**进程，
+    客户端被 SIGKILL 时无法把信号转发给容器，容器会继续跑下去。
+    """
+    try:
+        subprocess.run(
+            ["docker", "rm", "-f", name], capture_output=True, timeout=20, check=False
+        )
+    except Exception:  # pragma: no cover - 依赖本机 docker
+        logger.warning("清理沙箱容器失败：%s", name, exc_info=True)
+
+
 def run_script(
     script: str,
     timeout: int,
     project_root: str,
     *,
     allow_host_fallback: bool = False,
+    cancel_event=None,
 ) -> SandboxResult:
     """在沙箱里执行一段 shell 脚本。
 
@@ -152,6 +177,8 @@ def run_script(
         Docker 不可用时直接返回拒绝信息，绝不在宿主机跑。
     allow_host_fallback=True（用于受控命令如 git）：
         返回 ran=False，由调用方在宿主机执行。
+    cancel_event：threading.Event。置位后会**立刻**终止容器并返回，
+        因此「用户点停止」不需要等工具自然跑完（原先最长要等 run_tests 的 120 秒）。
     """
     if not docker_available():
         # 允许回退的情形：受控命令（git）或用户显式开启了宿主机执行
@@ -171,22 +198,68 @@ def run_script(
             f"   请先构建：docker build -t {IMAGE} .",
         )
 
-    cmd = _build_docker_cmd(project_root, script)
-    try:
-        r = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout, check=False
+    # 唯一容器名：便于超时/中断时精准 docker rm -f（也支持并发运行）
+    name = f"agent-exec-{uuid.uuid4().hex[:12]}"
+    cmd = _build_docker_cmd(project_root, script, name=name)
+
+    # 输出重定向到临时文件而不是 PIPE：容器输出可能超过管道缓冲区，
+    # 用 PIPE + poll 会因缓冲区写满而死锁。
+    with tempfile.TemporaryFile("w+", encoding="utf-8") as fo, tempfile.TemporaryFile(
+        "w+", encoding="utf-8"
+    ) as fe:
+        try:
+            proc = subprocess.Popen(cmd, stdout=fo, stderr=fe, text=True)
+        except Exception as e:  # pragma: no cover - 依赖本机 docker
+            return SandboxResult(True, f"❌ 沙箱执行失败：{e}")
+
+        deadline = time.monotonic() + timeout
+        cancelled = False
+        timed_out = False
+        while proc.poll() is None:
+            if cancel_event is not None and cancel_event.is_set():
+                cancelled = True
+                break
+            if time.monotonic() > deadline:
+                timed_out = True
+                break
+            time.sleep(0.2)
+
+        if cancelled or timed_out:
+            _kill_container(name)
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=10)
+            except Exception:
+                pass
+
+        rc = proc.returncode
+        fo.seek(0)
+        fe.seek(0)
+        stdout_text, stderr_text = fo.read(), fe.read()
+
+    if cancelled:
+        return SandboxResult(
+            True,
+            "⏹ 已按用户请求中断执行，容器已清理。\n"
+            f"（中断前捕获到的输出如下，可能不完整）\n{stdout_text[-1000:]}",
         )
-    except subprocess.TimeoutExpired:
-        return SandboxResult(True, f"❌ 执行超时（>{timeout} 秒），容器已终止")
-    except Exception as e:  # pragma: no cover - 依赖本机 docker
-        return SandboxResult(True, f"❌ 沙箱执行失败：{e}")
+    if timed_out:
+        # 注意：这里必须说明容器已被强制删除，否则用户会以为进程没了
+        return SandboxResult(
+            True,
+            f"❌ 执行超时（>{timeout} 秒），容器已强制终止并清理。\n"
+            f"（超时前捕获到的输出如下，可能不完整）\n{stdout_text[-1000:]}",
+        )
 
     out = ""
-    if r.stdout:
-        out += f"【stdout】\n{r.stdout}"
-    if r.stderr:
-        out += f"\n【stderr】\n{r.stderr}"
-    out += f"\n\n【退出码】{r.returncode}\n【沙箱】docker:{IMAGE}（network={NETWORK}）"
+    if stdout_text:
+        out += f"【stdout】\n{stdout_text}"
+    if stderr_text:
+        out += f"\n【stderr】\n{stderr_text}"
+    out += f"\n\n【退出码】{rc}\n【沙箱】docker:{IMAGE}（network={NETWORK}）"
     return SandboxResult(True, out)
 
 
@@ -196,6 +269,7 @@ def run_argv(
     project_root: str,
     *,
     allow_host_fallback: bool = False,
+    cancel_event=None,
 ) -> SandboxResult:
     """把一个命令（argv 列表）安全地转成 shell 脚本后送进沙箱。
 
@@ -204,7 +278,11 @@ def run_argv(
     """
     script = " ".join(shlex.quote(a) for a in argv)
     return run_script(
-        script, timeout, project_root, allow_host_fallback=allow_host_fallback
+        script,
+        timeout,
+        project_root,
+        allow_host_fallback=allow_host_fallback,
+        cancel_event=cancel_event,
     )
 
 
