@@ -68,6 +68,13 @@ def get_user_home() -> str:
     return os.path.expanduser("~")
 
 
+# 附件上传目录。
+# **刻意放在 home 下而不是 DATA_DIR**：Agent 工具的白名单（is_allowed_path）
+# 只放行用户主目录；若把附件放在别处（项目不在 home 下时就是这种情况），
+# Agent 的 read_file / edit_file 会读不到它，「让它改这本文档」就直接失效。
+UPLOAD_DIR = os.path.join(get_user_home(), ".agent-code", "uploads")
+
+
 def get_default_workspace() -> str:
     # 工作区 = 用户 home（与 System Prompt 一致）
     return get_user_home()

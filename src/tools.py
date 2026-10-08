@@ -422,28 +422,150 @@ def run_python(code: str, timeout: int = 30) -> str:
     return _truncate(res.output, 5000)
 
 
-# 危险命令黑名单
-BANNED_PATTERNS = [
-    "rm -rf",
-    "sudo ",
-    "mkfs",
-    "dd if=",
-    "dd of=",
-    "> /dev/",
-    "chmod 777",
-    "chown ",
-    ":(){:|:&};:",  # fork 炸弹
-    "curl ",
-    "wget ",
-    "nc ",
-    "ncat ",
-    "ssh ",
-    "scp ",
-    "shutdown",
-    "reboot",
-    "init ",
-    "kill -9 -1",
+# ===== 工具权限分类（全项目唯一的事实来源）=====
+# 权限分级与「要不要弹确认」都只查这张表。新增工具必须在这里登记，
+# 否则完备性测试会失败——这是防止「加了工具忘了分类」导致权限被绕过的有效手段。
+#
+#   read     : 只读，任何等级都直接执行
+#   internal : 只动会话内部状态（计划 / 记忆），不碰用户文件，任何等级都放行
+#   mutate   : 会改磁盘（建 / 改 / 批量改 / 删）
+#   execute  : 会执行代码或命令（含 git 写操作）
+TOOL_PERMISSION = {
+    # --- 只读 ---
+    "read_file": "read",
+    "read_file_range": "read",
+    "list_dir": "read",
+    "search_files": "read",
+    "find_references": "read",
+    "get_file_info": "read",
+    "get_function_body": "read",
+    "list_symbols": "read",
+    "project_info": "read",
+    "git_status": "read",
+    "git_diff": "read",
+    "git_log": "read",
+    "search_knowledge": "read",
+    # --- 会话内部状态 ---
+    "create_plan": "internal",
+    "update_plan": "internal",
+    "get_plan": "internal",
+    "save_memory": "internal",
+    "list_memories": "internal",
+    "delete_memory": "internal",
+    # --- 改磁盘 ---
+    "write_file": "mutate",
+    "create_file": "mutate",
+    "edit_file": "mutate",
+    "multi_edit": "mutate",
+    "delete_file": "mutate",
+    # --- 执行 ---
+    "run_command": "execute",
+    "run_python": "execute",
+    "run_tests": "execute",
+    "git_commit": "execute",
+    "git_rollback": "execute",
+}
+
+# 默认按最危险处理：万一有工具漏登记，宁可多要一次确认，也不能悄悄放行
+DEFAULT_PERMISSION_KIND = "mutate"
+
+
+def tool_permission_kind(name: str) -> str:
+    return TOOL_PERMISSION.get(name, DEFAULT_PERMISSION_KIND)
+
+
+def is_privileged_tool(name: str) -> bool:
+    """是否需要「等级 ≥2」才允许执行。"""
+    return tool_permission_kind(name) in ("mutate", "execute")
+
+
+# ===== 危险操作黑名单（所有等级一律生效，等级 3 也拦）=====
+# ⚠️ 这只是**减速带**，不是安全边界：关键词匹配永远能被绕过。
+#    真正拦住 Agent 的是沙箱（--network=none、--cap-drop=ALL、非 root、
+#    只挂载项目根目录）。这份清单挡住的是「明显不该做」的动作。
+#    按用户要求：**禁止一切外发**（联网、推送、安装、发信）。
+BANNED_RULES = [
+    # --- 外发 / 联网 ---
+    ("curl ", "联网下载"),
+    ("wget ", "联网下载"),
+    ("nc ", "网络连接"),
+    ("ncat ", "网络连接"),
+    ("netcat", "网络连接"),
+    ("telnet", "远程登录"),
+    ("ssh ", "远程登录"),
+    ("scp ", "远程复制"),
+    ("sftp", "远程复制"),
+    ("rsync ", "远程同步"),
+    ("ftp ", "网络传输"),
+    ("git push", "推送到远端"),
+    ("git remote add", "添加远端"),
+    ("git remote set-url", "修改远端"),
+    ("git fetch", "访问远端"),
+    ("git pull", "访问远端"),
+    ("git clone", "访问远端"),
+    ("pip install", "联网安装（会执行 postinstall 脚本）"),
+    ("pip3 install", "联网安装"),
+    ("npm install", "联网安装（会执行 postinstall 脚本）"),
+    ("yarn add", "联网安装"),
+    ("apt install", "联网安装"),
+    ("apt-get install", "联网安装"),
+    ("snap install", "联网安装"),
+    ("sendmail", "发送邮件"),
+    # --- 递归强删（各种拼写）---
+    ("rm -rf", "递归强制删除"),
+    ("rm -fr", "递归强制删除"),
+    ("rm -r -f", "递归强制删除"),
+    ("rm -f -r", "递归强制删除"),
+    ("rm --recursive", "递归删除"),
+    ("rm --force", "强制删除"),
+    ("find / -delete", "遍历删除"),
+    ("shred ", "不可恢复擦除"),
+    ("truncate -s 0", "清空文件"),
+    ("mkfs", "格式化文件系统"),
+    ("dd if=", "裸设备写入"),
+    ("dd of=", "裸设备写入"),
+    ("> /dev/", "写裸设备"),
+    ("fdisk", "分区操作"),
+    ("parted", "分区操作"),
+    ("mount ", "挂载"),
+    ("umount", "卸载"),
+    # --- 提权 ---
+    ("sudo ", "提权"),
+    ("sudo\t", "提权"),
+    ("su -", "切换用户"),
+    ("su root", "切换用户"),
+    ("pkexec", "提权"),
+    ("doas ", "提权"),
+    ("chmod 777", "放开全部权限"),
+    ("chown ", "改属主"),
+    # --- 系统控制 ---
+    ("shutdown", "关机"),
+    ("reboot", "重启"),
+    ("init ", "切换运行级"),
+    ("systemctl", "系统服务控制"),
+    ("service ", "系统服务控制"),
+    ("kill -9 -1", "杀全部进程"),
+    ("pkill -9", "批量强杀"),
+    ("killall", "批量杀进程"),
+    ("crontab", "写定时任务"),
+    (":(){:|:&};:", "fork 炸弹"),
+    (":(){", "fork 炸弹"),
+    # --- 全局配置 / 凭据 ---
+    ("git config --global", "改全局 git 配置"),
+    ("~/.ssh", "读写 SSH 凭据"),
+    ("id_rsa", "SSH 私钥"),
+    ("/etc/passwd", "系统账户文件"),
+    ("/etc/shadow", "系统口令文件"),
 ]
+
+
+def check_banned(cmd: str) -> str | None:
+    """命中黑名单则返回拒绝原因，否则 None。"""
+    low = (cmd or "").lower()
+    for pattern, reason in BANNED_RULES:
+        if pattern.lower() in low:
+            return f"❌ 命令被拒绝（{reason}）：包含禁止的关键字 `{pattern}`"
+    return None
 
 
 def run_command(cmd: str, timeout: int = 15) -> str:
@@ -462,11 +584,10 @@ def run_command(cmd: str, timeout: int = 15) -> str:
     if len(cmd) > 5000:
         return "❌ 命令太长（超过 5000 字符）"
 
-    # 黑名单检查
-    cmd_lower = cmd.lower()
-    for banned in BANNED_PATTERNS:
-        if banned.lower() in cmd_lower:
-            return f"❌ 命令被拒绝：包含禁止的关键字 `{banned}`"
+    # 黑名单检查（含「禁止一切外发」，等级 3 也照样拦）
+    banned = check_banned(cmd)
+    if banned:
+        return banned
 
     script = f"cd /workspace && {cmd}"
     res = sandbox.run_script(script, timeout, runtime.get_project_root())

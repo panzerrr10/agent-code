@@ -253,6 +253,25 @@ def clear_run(session_id=None):
         _cancel_events.pop(session_key(session_id), None)
 
 
+# ===== 会话权限等级（1 只读 / 2 确认 / 3 完全）=====
+def get_permission_level(session_id=None) -> int:
+    """当前会话的权限等级。
+
+    **服务端权威**：等级存在 sessions 表里、按会话读，前端传什么都不作数。
+    """
+    from config import DEFAULT_PERMISSION_LEVEL
+
+    try:
+        import db
+
+        key = session_key(session_id)
+        if str(key).isdigit():
+            return db.get_permission_level(int(key))
+    except Exception:
+        logger.warning("读取会话权限等级失败，回退默认值", exc_info=True)
+    return DEFAULT_PERMISSION_LEVEL
+
+
 def get_cancel_event(session_id=None):
     """取当前会话的取消标志（没有在运行的任务时返回 None）。
 

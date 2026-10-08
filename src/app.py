@@ -1,12 +1,14 @@
 import json
 import logging
 import os
+import time
 
 from flask import Flask, Response, jsonify, render_template, request, send_file
 
 import auth
 import db
 import paths
+import sandbox
 from agent import run_agent_stream
 from config_providers import DEFAULT_PROVIDER, RAG_PROVIDER, get_provider, get_provider_list
 from paths import ICON_PATH, STATIC_DIR, TEMPLATES_DIR, is_path_permitted
@@ -215,6 +217,121 @@ def project_tree():
         "children": _walk(path, 1),
     }
     return jsonify({"ok": True, "tree": tree})
+
+
+# ============ 附件（上传给 Agent 看 / 改）与下载 ============
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+# 这些后缀直接按 UTF-8 文本读；.pdf / .docx 交给 rag 里的解析器
+TEXT_EXT = {
+    ".txt", ".md", ".markdown", ".rst", ".log", ".csv", ".tsv", ".json", ".yaml", ".yml",
+    ".toml", ".ini", ".cfg", ".conf", ".xml", ".html", ".htm", ".css", ".scss", ".less",
+    ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".py", ".rb", ".go", ".rs", ".java",
+    ".kt", ".c", ".h", ".cpp", ".hpp", ".cs", ".php", ".sh", ".bash", ".zsh", ".sql",
+    ".env", ".gitignore", ".dockerfile",
+}
+
+
+def _extract_attachment_text(name: str, raw: bytes) -> tuple[str | None, str | None]:
+    """把上传的附件转成文本。返回 (text, error)。"""
+    ext = os.path.splitext(name)[1].lower()
+    if ext in (".pdf", ".docx"):
+        try:
+            import rag
+
+            return rag.extract_text(name, raw), None
+        except Exception as e:
+            return None, f"解析失败：{e}"
+    try:
+        return raw.decode("utf-8"), None
+    except UnicodeDecodeError:
+        return None, "不是 UTF-8 文本（二进制或其它编码），无法作为文档附件"
+
+
+@app.route("/api/attach", methods=["POST"])
+def api_attach():
+    """接收附件并落盘，返回可供 Agent 使用的信息。
+
+    落盘位置：``~/.agent-code/uploads/<会话>/``。放在 home 内是为了让 Agent 的
+    read_file / edit_file 一定能操作它（工具白名单只放行 home），
+    这样「按需求改这份文档」就是一次普通的 edit_file。
+    """
+    import paths as _paths
+
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"ok": False, "error": "没有收到文件"}), 400
+
+    raw = f.read()
+    if len(raw) > MAX_UPLOAD_BYTES:
+        return jsonify(
+            {"ok": False, "error": f"文件太大（{len(raw) / 1024 / 1024:.1f} MB），上限 10 MB"}
+        ), 400
+
+    name = os.path.basename(f.filename) or "attachment"
+    text, err = _extract_attachment_text(name, raw)
+    if err:
+        return jsonify({"ok": False, "error": err}), 400
+
+    sid = str(request.form.get("session_id") or "shared")
+    safe_sid = "".join(c for c in sid if c.isalnum() or c in "-_") or "shared"
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    safe_name = "".join(c for c in name if c.isalnum() or c in "._- ").strip() or "attachment"
+    folder = os.path.join(_paths.UPLOAD_DIR, safe_sid)
+    os.makedirs(folder, exist_ok=True)
+    dest = os.path.join(folder, f"{stamp}_{safe_name}")
+    with open(dest, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+    return jsonify(
+        {
+            "ok": True,
+            "name": name,
+            "path": dest,
+            "size": len(raw),
+            "chars": len(text),
+            "preview": text[:400],
+        }
+    )
+
+
+def _load_attachments(items) -> list:
+    """把前端传来的 [{path, name}] 读成带正文的附件（供拼进消息）。"""
+    out = []
+    for it in items or []:
+        if not isinstance(it, dict):
+            continue
+        path = (it.get("path") or "").strip()
+        if not path or not is_path_permitted(path) or not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+        except Exception:
+            continue
+        out.append(
+            {"name": it.get("name") or os.path.basename(path), "path": path, "text": text}
+        )
+    return out
+
+
+@app.route("/api/download", methods=["GET"])
+def download_file():
+    """下载文件（浏览器默认存到系统「下载」目录）。
+
+    实测本机 Chromium 会遵循 XDG 配置存到 ``/home/pz/下载``，所以这里只要
+    带上 Content-Disposition 即可，不需要服务端写盘（也就没有越权写文件的风险）。
+    """
+    path = request.args.get("path", "")
+    if not path:
+        return jsonify({"ok": False, "error": "缺少 path 参数"}), 400
+    if not is_path_permitted(path):
+        return jsonify({"ok": False, "error": f"拒绝下载：{path} 不在允许范围内"}), 403
+    if not os.path.isfile(path):
+        return jsonify({"ok": False, "error": f"文件不存在：{path}"}), 400
+    # 允许前端指定下载显示名（附件落盘时带了时间戳前缀，直接下会很难看）
+    wanted = os.path.basename((request.args.get("name") or "").strip())
+    download_name = wanted or os.path.basename(path)
+    return send_file(path, as_attachment=True, download_name=download_name)
 
 
 # ============ 文件读写（右侧文件面板）============
@@ -447,6 +564,58 @@ def new_session():
     return jsonify({"id": sid, "title": "新对话", "workspace_id": actual_wid})
 
 
+# ============ 会话权限等级 ============
+PERMISSION_LABELS = {1: "只读", 2: "确认", 3: "完全"}
+
+
+@app.route("/sessions/<int:session_id>/permission", methods=["POST"])
+def set_session_permission(session_id):
+    """设置会话权限等级：1 只读 / 2 确认 / 3 完全。
+
+    等级是**服务端权威**的：存在 sessions 表里，run 时由后端按 session 读取，
+    前端传什么都不作数——和「确认令牌在服务端」同一个思路。
+    """
+    if not db.get_session(session_id):
+        return jsonify({"ok": False, "error": "会话不存在"}), 404
+
+    data = request.get_json(silent=True) or {}
+    try:
+        level = int(data.get("level"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "level 必须是 1 / 2 / 3"}), 400
+    if level not in (1, 2, 3):
+        return jsonify({"ok": False, "error": "level 必须是 1 / 2 / 3"}), 400
+
+    # 等级 3 允许 Agent 自动执行命令；若同时开了「宿主机执行」（而非 Docker 沙箱），
+    # 就等于在自己家目录里无限制执行，风险不可接受，直接拒绝。
+    if level == 3 and sandbox.ALLOW_HOST_EXEC:
+        return jsonify(
+            {
+                "ok": False,
+                "error": "已开启 AGENT_ALLOW_HOST_EXEC（宿主机执行），"
+                "为安全起见禁止启用「等级 3 完全」；请改用 Docker 沙箱或选等级 2",
+            }
+        ), 400
+
+    db.set_permission_level(session_id, level)
+    return jsonify({"ok": True, "level": level, "label": PERMISSION_LABELS[level]})
+
+
+@app.route("/sessions/<int:session_id>/permission", methods=["GET"])
+def get_session_permission(session_id):
+    if not db.get_session(session_id):
+        return jsonify({"ok": False, "error": "会话不存在"}), 404
+    level = db.get_permission_level(session_id)
+    return jsonify(
+        {
+            "ok": True,
+            "level": level,
+            "label": PERMISSION_LABELS[level],
+            "host_exec": sandbox.ALLOW_HOST_EXEC,
+        }
+    )
+
+
 # ============ 工作区 ============
 @app.route("/workspaces", methods=["GET"])
 def list_workspaces():
@@ -663,6 +832,7 @@ def run():
                 rag_base_url=rag_base_url,
                 project_root=project_root,
                 images=images,
+                attachments=_load_attachments(data.get("attachments")),
             ):
                 # 本次运行是否停在“等待用户确认”：此时不落库，等续跑那轮再保存完整回答
                 if str(event.get("type", "")).startswith("confirm_"):

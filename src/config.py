@@ -17,5 +17,8 @@ MAX_STEPS = 50  # 最多执行 50步，防止死循环
 MAX_FILE_SIZE = 100_000  # 单文件最多读 100KB
 MAX_LIST_ITEMS = 200  # 单次最多列 200 项
 
+# 会话权限等级：1 只读 / 2 确认 / 3 完全。新会话一律从最稳妥的 2 开始。
+DEFAULT_PERMISSION_LEVEL = 2
+
 
 

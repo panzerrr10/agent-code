@@ -1,5 +1,4 @@
 import json
-import os
 import secrets
 
 from config import MAX_STEPS
@@ -9,7 +8,7 @@ from config_providers import (
     get_provider,
     get_provider_id_by_base_url,
 )
-from tools import execute_tool, get_tools_schema
+from tools import execute_tool, get_tools_schema, is_privileged_tool
 from utils import call_llm_with_retry, get_llm_client
 
 
@@ -99,6 +98,149 @@ def _ensure_reasoning_consistency(messages):
                 m["reasoning_content"] = ""
 
 
+ATTACH_PREVIEW_CHARS = 6000
+
+
+def _format_attachments(attachments, preview_chars: int = ATTACH_PREVIEW_CHARS) -> str:
+    """把附件正文拼进用户消息。
+
+    策略：**正文预览内联**（模型不必为了看一眼再花一轮 read_file），
+    同时给出**完整落盘路径** —— 这样「让 Agent 按需求改这份文档」就能直接
+    edit_file 那个路径，改完用户再下载即可。
+    """
+    blocks = []
+    for i, att in enumerate(attachments or [], 1):
+        if not isinstance(att, dict):
+            continue
+        name = att.get("name") or "附件"
+        path = att.get("path") or ""
+        text = att.get("text") or ""
+        total = len(text)
+        preview = text[:preview_chars]
+        block = (
+            f"【附件 {i}】{name}（共 {total} 字符）\n"
+            f"已保存到：{path}\n"
+            f"----- 内容开始 -----\n{preview}\n----- 内容结束 -----"
+        )
+        if total > preview_chars:
+            block += (
+                f"\n（上面只显示了前 {preview_chars} 字符。"
+                f"需要完整内容请用 read_file 读 `{path}`；"
+                f"需要修改就直接 edit_file / write_file 这个路径，改完告诉用户可以下载。）"
+            )
+        blocks.append(block)
+    if not blocks:
+        return ""
+    return "\n\n" + "\n\n".join(blocks)
+
+
+PERM_READONLY, PERM_CONFIRM, PERM_FULL = 1, 2, 3
+
+
+def _permission_gate(func_name: str, args: dict, auto_confirm: bool):
+    """权限闸门：**所有工具执行前都必须过这里**。
+
+    返回 (action, message)，action ∈ {"allow", "deny", "confirm"}。
+
+    之所以收敛成一个判定点：原来「哪些工具要确认」是用 6 段
+    `if func_name == "..."` 手写在各处的，加个工具就会漏——事实上
+    create_file / edit_file / multi_edit 就一直漏着确认。
+    """
+    import runtime
+    from tools import is_privileged_tool, is_safe_command
+
+    if not is_privileged_tool(func_name):
+        return "allow", ""
+
+    # auto_confirm（CLI 的 -y）等价于本次运行强制等级 3
+    level = PERM_FULL if auto_confirm else runtime.get_permission_level()
+
+    if level == PERM_READONLY:
+        return "deny", (
+            f"⛔ 当前会话是【等级 1 · 只读模式】，已拒绝执行 `{func_name}`。"
+            "你只能读取和分析文件，不能修改或执行命令；"
+            "请把具体的修改建议告诉用户，由用户自己操作。"
+        )
+
+    # 等级 2 下，纯只读命令（ls/cat/git status…）不必打扰用户
+    if level == PERM_CONFIRM and func_name == "run_command":
+        if is_safe_command(args.get("cmd", "") or ""):
+            return "allow", ""
+
+    if level == PERM_FULL:
+        return "allow", ""
+    return "confirm", ""
+
+
+def _confirm_event(func_name: str, args: dict, token: str) -> dict:
+    """按工具类型构造确认事件。
+
+    文件类统一发 confirm_write、执行类统一发 confirm_command —— 前端已有的
+    两种卡片足够表达，不必为每个工具新增一种事件。
+    """
+    import os as _os
+
+    if func_name == "delete_file":
+        return {
+            "type": "confirm_delete",
+            "path": args.get("path", ""),
+            "confirm_token": token,
+        }
+
+    file_labels = {
+        "write_file": "覆盖写入",
+        "create_file": "创建文件",
+        "edit_file": "编辑文件",
+        "multi_edit": "批量编辑",
+    }
+    if func_name in file_labels:
+        path = args.get("path", "")
+        old_content = args.get("old_text", "") or ""
+        new_content = args.get("new_text", "") or args.get("content", "") or ""
+
+        if func_name == "multi_edit":
+            edits = args.get("edits") or []
+            paths = sorted({str(e.get("path", "")) for e in edits if isinstance(e, dict)})
+            path = "、".join(p for p in paths if p) or "（多个文件）"
+            old_content = "\n\n".join(
+                str(e.get("old_text", "")) for e in edits if isinstance(e, dict)
+            )[:2000]
+            new_content = "\n\n".join(
+                str(e.get("new_text", "")) for e in edits if isinstance(e, dict)
+            )[:2000]
+        elif not old_content:
+            # 覆盖写入：把原文件内容读出来做对比
+            try:
+                if path and _os.path.isfile(path):
+                    with open(path, encoding="utf-8", errors="ignore") as f:
+                        old_content = f.read()
+            except Exception:
+                old_content = "（无法读取原内容）"
+
+        return {
+            "type": "confirm_write",
+            "path": path,
+            "old_content": old_content,
+            "new_content": new_content,
+            "label": file_labels[func_name],
+            "confirm_token": token,
+        }
+
+    if func_name == "run_python":
+        cmd = "# run_python 执行代码：\n" + (args.get("code") or "")[:300]
+    elif func_name == "run_command":
+        cmd = args.get("cmd", "")
+    elif func_name == "git_commit":
+        cmd = f"git commit: {args.get('message', '')}"
+    elif func_name == "git_rollback":
+        cmd = f"git rollback: {args}"
+    elif func_name == "run_tests":
+        cmd = f"run_tests: {args.get('path') or '(自动识别测试框架)'}"
+    else:
+        cmd = f"{func_name} {args}"
+    return {"type": "confirm_command", "cmd": cmd, "confirm_token": token}
+
+
 def run_agent_stream(
     user_task: str,
     session_id: int = None,
@@ -113,6 +255,7 @@ def run_agent_stream(
     rag_api_key: str = None,
     rag_base_url: str = None,
     images: list = None,
+    attachments: list = None,
     _resume: bool = False,
 ):
     """
@@ -288,11 +431,15 @@ def run_agent_stream(
 
     # 加当前任务（若从 pending 恢复，则跳过——task 已在 messages 里）
     if not _resumed_from_pending:
+        # 附件正文（文档）拼在任务后面；图片走多模态数组
+        task_text = user_task + _format_attachments(attachments or [])
+        if attachments:
+            print(f"[ATTACH] received {len(attachments)} attachments")
         if images:
             # 多模态：content 改成数组 [text 块 + image_url 块]
             # 注意：仅打印数量，绝不打印 Base64，防止爆日志
             print(f"[IMG] received {len(images)} images")
-            content = [{"type": "text", "text": user_task}]
+            content = [{"type": "text", "text": task_text}]
             for img in images:
                 # img 是前端传来的 data URL（data:image/png;base64,...）
                 content.append(
@@ -300,7 +447,7 @@ def run_agent_stream(
                 )
             messages.append({"role": "user", "content": content})
         else:
-            messages.append({"role": "user", "content": user_task})
+            messages.append({"role": "user", "content": task_text})
 
     # 累计 tokens（只定义一次）
     total_prompt_tokens = 0
@@ -564,209 +711,64 @@ def run_agent_stream(
 
                 yield {"type": "tool_call", "name": func_name, "args": args}
 
-                # 拦截 delete_file
-                if func_name == "delete_file":
-                    if auto_confirm:
-                        result = execute_tool(func_name, args)
-                        yield {"type": "tool_result", "content": result}
-                        # ✅ 失败跟踪
-                        if isinstance(result, str) and result.startswith("❌"):
-                            failure_tracker[func_name] = (
-                                failure_tracker.get(func_name, 0) + 1
-                            )
-                            fail_count = failure_tracker[func_name]
+                # ===== 权限闸门（全项目唯一的判定点）=====
+                _action, _deny_msg = _permission_gate(func_name, args, auto_confirm)
 
-                            if fail_count >= 3:
-                                # 连续失败 3 次，强制停止
-                                yield {
-                                    "type": "text",
-                                    "content": f"\n\n⚠️ 工具 `{func_name}` 已连续失败 3 次，停止执行。请检查任务描述或手动处理。",
-                                }
-                                yield {"type": "done"}
-                                return
-                            elif fail_count >= 2:
-                                # 连续失败 2 次，注入提示
-                                messages.append(
-                                    {
-                                        "role": "user",
-                                        "content": f"⚠️ 系统提示：`{func_name}` 已连续失败 {fail_count} 次。请分析失败原因，换个方式重试，或告诉用户无法完成。",
-                                    }
-                                )
-                        else:
-                            # 成功，清零
-                            failure_tracker[func_name] = 0
+                if _action == "deny":
+                    # 等级 1：不弹确认，直接把原因回给模型。
+                    # 必须把结果写进 messages，否则模型会反复重试同一个工具白烧 token。
+                    result = _deny_msg
+                    yield {
+                        "type": "permission_denied",
+                        "name": func_name,
+                        "content": result,
+                    }
+                    messages.append(
+                        {"role": "tool", "tool_call_id": tc.id, "content": result}
+                    )
+                    continue
 
-                        messages.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": tc.id,
-                                "content": result,
-                            }
-                        )
-                        continue
-                    else:
-                        _token = _save_pending_with_processed(idx, tc, func_name, args)
-                        yield {
-                            "type": "confirm_delete",
-                            "path": args.get("path", ""),
-                            "confirm_token": _token,
-                        }
-                        return
+                if _action == "confirm":
+                    _token = _save_pending_with_processed(idx, tc, func_name, args)
+                    yield _confirm_event(func_name, args, _token)
+                    return
 
-                # 拦截 write_file
-                if func_name == "write_file":
-                    if auto_confirm:
-                        result = execute_tool(func_name, args)
-                        yield {"type": "tool_result", "content": result}
-                        messages.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": tc.id,
-                                "content": result,
-                            }
-                        )
-                        continue
-                    else:
-                        # 发确认请求，附带新旧内容对比
-                        path = args.get("path", "")
-                        new_content = args.get("content", "")
-
-                        # 读取原内容
-                        try:
-                            old_content = ""
-                            if os.path.exists(path):
-                                with open(
-                                    path, encoding="utf-8", errors="ignore"
-                                ) as f:
-                                    old_content = f.read()
-                        except Exception:
-                            old_content = "（无法读取原内容）"
-
-                        _token = _save_pending_with_processed(idx, tc, func_name, args)
-                        yield {
-                            "type": "confirm_write",
-                            "path": path,
-                            "old_content": old_content,
-                            "new_content": new_content,
-                            "confirm_token": _token,
-                        }
-                        return
-                        # 拦截 run_command
-                if func_name == "run_command":
-                    cmd = args.get("cmd", "")
-
-                    # 检查是否安全命令
-                    from tools import is_safe_command
-
-                    if is_safe_command(cmd) or auto_confirm:
-                        # 安全命令 或 用户已确认 → 直接执行
-                        result = execute_tool(func_name, args)
-                        yield {"type": "tool_result", "content": result}
-                        messages.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": tc.id,
-                                "content": result,
-                            }
-                        )
-                        continue
-                    else:
-                        # 不安全 → 弹确认
-                        _token = _save_pending_with_processed(idx, tc, func_name, args)
-                        yield {
-                            "type": "confirm_command",
-                            "cmd": cmd,
-                            "confirm_token": _token,
-                        }
-                        return
-
-                # 拦截 run_python
-                if func_name == "run_python":
-                    if auto_confirm:
-                        result = execute_tool(func_name, args)
-                        yield {"type": "tool_result", "content": result}
-                        messages.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": tc.id,
-                                "content": result,
-                            }
-                        )
-                        continue
-                    else:
-                        _token = _save_pending_with_processed(idx, tc, func_name, args)
-                        code_preview = (args.get("code") or "")[:300]
-                        yield {
-                            "type": "confirm_command",
-                            "cmd": f"# run_python 执行代码：\n{code_preview}",
-                            "confirm_token": _token,
-                        }
-                        return
-
-                # 拦截 git_commit
-                if func_name == "git_commit":
-                    if auto_confirm:
-                        result = execute_tool(func_name, args)
-                        yield {"type": "tool_result", "content": result}
-                        messages.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": tc.id,
-                                "content": result,
-                            }
-                        )
-                        continue
-                    else:
-                        _token = _save_pending_with_processed(idx, tc, func_name, args)
-                        yield {
-                            "type": "confirm_command",
-                            "cmd": f"git commit: {args.get('message', '')}",
-                            "confirm_token": _token,
-                        }
-                        return
-
-                # 拦截 git_rollback
-                if func_name == "git_rollback":
-                    if auto_confirm:
-                        result = execute_tool(func_name, args)
-                        yield {"type": "tool_result", "content": result}
-                        messages.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": tc.id,
-                                "content": result,
-                            }
-                        )
-                        continue
-                    else:
-                        _token = _save_pending_with_processed(idx, tc, func_name, args)
-                        yield {
-                            "type": "confirm_command",
-                            "cmd": f"git rollback: {args}",
-                            "confirm_token": _token,
-                        }
-                        return
-
-                # 其他工具，正常执行
+                # _action == "allow"：执行
                 result = execute_tool(func_name, args)
                 yield {"type": "tool_result", "content": result}
+
                 if func_name in ("create_plan", "update_plan", "get_plan"):
                     from tools import get_plan_data
 
-                    yield {
-                        "type": "plan_update",
-                        "plan": get_plan_data(),
-                    }
+                    yield {"type": "plan_update", "plan": get_plan_data()}
+
+                # 失败跟踪：会改磁盘 / 会执行的工具连续失败 3 次就停下，
+                # 避免它在同一个坑里反复重试（原来只对 delete_file 生效）。
+                if is_privileged_tool(func_name) and isinstance(result, str) and result.startswith("❌"):
+                    failure_tracker[func_name] = failure_tracker.get(func_name, 0) + 1
+                    fail_count = failure_tracker[func_name]
+                    if fail_count >= 3:
+                        yield {
+                            "type": "text",
+                            "content": f"\n\n⚠️ 工具 `{func_name}` 已连续失败 3 次，停止执行。请检查任务描述或手动处理。",
+                        }
+                        yield {"type": "done"}
+                        return
+                    if fail_count >= 2:
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": f"⚠️ 系统提示：`{func_name}` 已连续失败 {fail_count} 次。请分析失败原因，换个方式重试，或告诉用户无法完成。",
+                            }
+                        )
+                elif isinstance(result, str) and result.startswith("❌"):
+                    failure_tracker[func_name] = 0
 
                 messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result,
-                    }
+                    {"role": "tool", "tool_call_id": tc.id, "content": result}
                 )
-            continue
 
+            continue
         # 情况 2：给出最终答案
         content = assistant_msg.content or ""
         yield {"type": "text", "content": content}

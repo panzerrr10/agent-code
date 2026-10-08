@@ -12,6 +12,7 @@ import os
 import sqlite3
 from datetime import datetime
 
+from config import DEFAULT_PERMISSION_LEVEL
 from paths import DB_PATH
 
 
@@ -95,6 +96,13 @@ def init_db():
     cols = {row[1] for row in cursor.execute("PRAGMA table_info(sessions)")}
     if "workspace_id" not in cols:
         cursor.execute("ALTER TABLE sessions ADD COLUMN workspace_id INTEGER")
+    # 会话级权限等级：1 只读 / 2 确认（默认）/ 3 完全。
+    # 存在会话上而不是做全局开关，是因为同一工作区里「只读看代码」和「放手重构」
+    # 是完全不同的诉求，而且本应用支持多会话并行跑，全局开关做不到这个区分。
+    if "permission_level" not in cols:
+        cursor.execute(
+            "ALTER TABLE sessions ADD COLUMN permission_level INTEGER NOT NULL DEFAULT 2"
+        )
 
     # 索引：读会话历史是最热路径（WHERE session_id ORDER BY id）
     cursor.execute(
@@ -168,8 +176,9 @@ def create_session(title: str = "新对话", workspace_id: int | None = None) ->
         row = cursor.execute("SELECT id FROM workspaces ORDER BY id LIMIT 1").fetchone()
         workspace_id = row[0] if row else None
     cursor.execute(
-        "INSERT INTO sessions (title, created_at, updated_at, workspace_id) VALUES (?, ?, ?, ?)",
-        (title, now, now, workspace_id),
+        "INSERT INTO sessions (title, created_at, updated_at, workspace_id, permission_level) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (title, now, now, workspace_id, DEFAULT_PERMISSION_LEVEL),
     )
     session_id = cursor.lastrowid
     conn.commit()
@@ -183,12 +192,12 @@ def get_all_sessions(workspace_id: int | None = None):
     cursor = conn.cursor()
     if workspace_id is None:
         cursor.execute(
-            "SELECT id, title, created_at, updated_at, workspace_id "
+            "SELECT id, title, created_at, updated_at, workspace_id, permission_level "
             "FROM sessions ORDER BY updated_at DESC"
         )
     else:
         cursor.execute(
-            "SELECT id, title, created_at, updated_at, workspace_id "
+            "SELECT id, title, created_at, updated_at, workspace_id, permission_level "
             "FROM sessions WHERE workspace_id = ? ORDER BY updated_at DESC",
             (workspace_id,),
         )
@@ -201,6 +210,7 @@ def get_all_sessions(workspace_id: int | None = None):
             "created_at": r[2],
             "updated_at": r[3],
             "workspace_id": r[4],
+            "permission_level": r[5],
         }
         for r in rows
     ]
@@ -210,7 +220,8 @@ def get_session(session_id: int):
     """取单个会话（含所属工作区）。"""
     conn = _connect()
     row = conn.execute(
-        "SELECT id, title, created_at, updated_at, workspace_id FROM sessions WHERE id = ?",
+        "SELECT id, title, created_at, updated_at, workspace_id, permission_level "
+        "FROM sessions WHERE id = ?",
         (session_id,),
     ).fetchone()
     conn.close()
@@ -222,7 +233,31 @@ def get_session(session_id: int):
         "created_at": row[2],
         "updated_at": row[3],
         "workspace_id": row[4],
+        "permission_level": row[5] if len(row) > 5 else DEFAULT_PERMISSION_LEVEL,
     }
+
+
+def set_permission_level(session_id: int, level: int) -> bool:
+    """设置会话权限等级（1 只读 / 2 确认 / 3 完全）。"""
+    if level not in (1, 2, 3):
+        return False
+    conn = _connect()
+    conn.execute("UPDATE sessions SET permission_level = ? WHERE id = ?", (level, session_id))
+    conn.commit()
+    conn.close()
+    return True
+
+
+def get_permission_level(session_id: int) -> int:
+    """读会话权限等级；查不到时给安全的默认值。"""
+    conn = _connect()
+    row = conn.execute(
+        "SELECT permission_level FROM sessions WHERE id = ?", (session_id,)
+    ).fetchone()
+    conn.close()
+    if not row or row[0] not in (1, 2, 3):
+        return DEFAULT_PERMISSION_LEVEL
+    return int(row[0])
 
 
 # ============ 工作区 ============
