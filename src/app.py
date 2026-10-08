@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 
 from flask import Flask, Response, jsonify, render_template, request, send_file
@@ -9,6 +10,8 @@ import paths
 from agent import run_agent_stream
 from config_providers import DEFAULT_PROVIDER, RAG_PROVIDER, get_provider, get_provider_list
 from paths import ICON_PATH, STATIC_DIR, TEMPLATES_DIR, is_path_permitted
+
+logger = logging.getLogger(__name__)
 
 # 前端资源在 <root>/web/{templates,static}，必须显式告诉 Flask，
 # 否则它会去 src/ 下找 templates/static，页面与静态资源全 404
@@ -85,33 +88,67 @@ def favicon():
     return send_file(ICON_PATH, mimetype="image/png")
 
 
-@app.route("/api/select_folder", methods=["POST"])
-def select_folder():
-    """弹系统"选择文件夹"对话框，返回绝对路径。
-    注意：这个 API 只在桌面环境下有效（有 tkinter + 显示）。
+def _pick_folder(title: str, initial: str | None):
+    """弹系统「选择文件夹」对话框，返回绝对路径；取消返回 None。
+
+    优先用 **zenity**（Ubuntu 24 上是 4.x，即 GTK4 实现）——观感与系统其它程序
+    （比如浏览器上传文件时）完全一致：左侧「最近使用 / 主目录 / 视频 / 图片…」
+    侧栏、橙色确认按钮。
+
+    原先用 tkinter 的 ``askdirectory``，弹出来是 Tk 自带的老式对话框，与系统不一致。
+    tkinter 仍保留作兜底（zenity 缺失或没有图形环境时）。
     """
+    import shutil
+    import subprocess
+
+    if shutil.which("zenity"):
+        cmd = ["zenity", "--file-selection", "--directory", f"--title={title}"]
+        if initial and os.path.isdir(initial):
+            # 末尾的 / 让 zenity 直接定位到该目录
+            cmd.append(f"--filename={initial.rstrip('/')}/")
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            # 用户取消时 zenity 退出码为 1、无输出，不当作错误
+            return (r.stdout or "").strip() or None
+        except subprocess.TimeoutExpired:
+            return None
+        except Exception:
+            logger.warning("zenity 弹窗失败，回退 tkinter", exc_info=True)
+
     try:
         import tkinter as tk
         from tkinter import filedialog
 
-        # 创建隐藏的根窗口
         root = tk.Tk()
         root.withdraw()
-        root.attributes("-topmost", True)  # 弹窗置顶
-
-        folder = filedialog.askdirectory(
-            title="选择项目文件夹",
-            mustexist=True,
-        )
-
+        root.attributes("-topmost", True)
+        folder = filedialog.askdirectory(title=title, mustexist=True)
         root.destroy()
+        return folder or None
+    except Exception:
+        logger.warning("tkinter 弹窗也失败", exc_info=True)
+        return None
 
-        if not folder:
-            return jsonify({"ok": False, "error": "未选择文件夹"})
 
-        return jsonify({"ok": True, "path": folder})
-    except Exception as e:
+@app.route("/api/select_folder", methods=["POST"])
+def select_folder():
+    """弹系统原生「选择文件夹」对话框，返回绝对路径。
+
+    对调用方保持兼容（仍返回 ok/path），另加 cancelled 以便前端区分
+    「用户取消」与「弹窗失败」——取消不该弹错误提示。
+    """
+    data = request.get_json(silent=True) or {}
+    title = (data.get("title") or "选择文件夹").strip()
+    initial = (data.get("initial") or "").strip() or None
+
+    try:
+        path = _pick_folder(title, initial)
+    except Exception as e:  # pragma: no cover - 依赖本机图形环境
         return jsonify({"ok": False, "error": f"弹窗失败：{e}"}), 500
+
+    if not path:
+        return jsonify({"ok": False, "cancelled": True})
+    return jsonify({"ok": True, "path": path})
 
 
 @app.route("/api/project_tree", methods=["GET"])
