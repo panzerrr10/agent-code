@@ -2033,11 +2033,25 @@
             text-overflow: ellipsis;
         }
 
-        /* 输入框在窗口底部，下拉要向上弹 */
+        /* 输入框在窗口底部，下拉必须向上弹 */
         .model-picker.compact .model-picker-dropdown {
             bottom: calc(100% + 6px);
             top: auto;
             left: 0;
+        }
+
+        /*
+         * 设置面板里的下拉要**向下**弹。
+         * 基础样式是 bottom:100%（向上），那是给窗口底部的输入框设计的；
+         * 设置面板里模型框上面就是分区标题，向上弹会盖住内容看不清。
+         * 这里放在「大模型」分区（面板最上方），下方空间充足。
+         */
+        #settingsModelPicker .model-picker-dropdown {
+            top: calc(100% + 6px);
+            bottom: auto;
+            left: 0;
+            min-width: 240px;
+            max-height: 260px;
         }
 
         body.dark .model-picker.compact > button { background: #232833; color: #cbd5e1; }
