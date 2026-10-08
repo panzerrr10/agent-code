@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import threading
 import time
 
 from flask import Flask, Response, jsonify, render_template, request, send_file
@@ -23,6 +24,17 @@ app = Flask(
     static_folder=STATIC_DIR,
 )
 db.init_db()
+
+# MCP 插件：后台连接已启用的 server（**不阻塞启动** —— 慢 server 不该拖死应用）
+def _mcp_boot():
+    try:
+        import mcp_client
+        mcp_client.start_background_connect()
+    except Exception:
+        logger.warning("MCP 后台连接启动失败", exc_info=True)
+
+
+threading.Thread(target=_mcp_boot, name="mcp-app-boot", daemon=True).start()
 
 
 @app.before_request
@@ -562,6 +574,126 @@ def new_session():
     if actual_wid is not None:
         db.touch_workspace(actual_wid)
     return jsonify({"id": sid, "title": "新对话", "workspace_id": actual_wid})
+
+
+# ============ MCP 插件 ============
+def _mcp_overview() -> dict:
+    """服务器列表 + 运行状态。**不含任何密钥类字段**（env 只回键名）。"""
+    import mcp_client
+    import mcp_config
+
+    servers = []
+    for cfg in mcp_config.list_servers():
+        status = mcp_client.server_status(cfg["name"])
+        item = dict(cfg)
+        # env 里可能有 token，只回键名不回值
+        item["env_keys"] = sorted((cfg.get("env") or {}).keys())
+        item.pop("env", None)
+        item.update({
+            "runtime_status": status["status"],
+            "runtime_error": status["error"],
+            "tool_count": status["tool_count"],
+            "tools": [
+                t["function"]["name"].split("__", 2)[-1]
+                for t in mcp_client.tool_schemas()
+                if mcp_client.resolve(t["function"]["name"])
+                and mcp_client.resolve(t["function"]["name"])[0] == cfg["name"]
+            ],
+        })
+        servers.append(item)
+
+    return {
+        "servers": servers,
+        "inject_enabled": mcp_config.load_config().get("inject_enabled", True),
+        "config_path": mcp_config.MCP_FILE,
+    }
+
+
+@app.route("/api/mcp/servers", methods=["GET"])
+def mcp_list():
+    return jsonify({"ok": True, **_mcp_overview()})
+
+
+@app.route("/api/mcp/servers", methods=["POST"])
+def mcp_upsert():
+    """新增或修改一个 server。**保存 ≠ 启用**：enabled 由请求显式给出，默认 false。"""
+    import mcp_client
+    import mcp_config
+
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    body = {k: v for k, v in data.items() if k != "name"}
+
+    cfg, err = mcp_config.validate(name, body)
+    if err:
+        return jsonify({"ok": False, "error": err}), 400
+
+    existed = mcp_config.get_server(name) is not None
+    was_enabled = bool((mcp_config.get_server(name) or {}).get("enabled"))
+    mcp_config.upsert_server(name, body)
+
+    # 已经连着的，改动后重连一次让新配置生效
+    if existed and was_enabled:
+        mcp_client.disconnect(name)
+        if cfg["enabled"]:
+            ok, msg = mcp_client.connect(name)
+            logger.info("MCP %s 重连：%s", name, msg)
+
+    return jsonify({"ok": True, **_mcp_overview()})
+
+
+@app.route("/api/mcp/servers/<name>", methods=["DELETE"])
+def mcp_delete(name):
+    import mcp_client
+    import mcp_config
+
+    mcp_client.disconnect(name)
+    if not mcp_config.delete_server(name):
+        return jsonify({"ok": False, "error": "没有这个 server"}), 404
+    return jsonify({"ok": True, **_mcp_overview()})
+
+
+@app.route("/api/mcp/servers/<name>/enabled", methods=["POST"])
+def mcp_set_enabled(name):
+    """启用 / 停用。启用时才真正去连（含起子进程）。"""
+    import mcp_client
+    import mcp_config
+
+    if mcp_config.get_server(name) is None:
+        return jsonify({"ok": False, "error": "没有这个 server"}), 404
+
+    want = bool((request.get_json(silent=True) or {}).get("enabled"))
+    mcp_config.patch_server(name, enabled=want)
+
+    msg = ""
+    if want:
+        ok, msg = mcp_client.connect(name)
+    else:
+        mcp_client.disconnect(name)
+
+    return jsonify({"ok": True, "message": msg, **_mcp_overview()})
+
+
+@app.route("/api/mcp/servers/<name>/reconnect", methods=["POST"])
+def mcp_reconnect(name):
+    import mcp_client
+    import mcp_config
+
+    if mcp_config.get_server(name) is None:
+        return jsonify({"ok": False, "error": "没有这个 server"}), 404
+    mcp_client.disconnect(name)
+    ok, msg = mcp_client.connect(name)
+    return jsonify({"ok": ok, "message": msg, **_mcp_overview()})
+
+
+@app.route("/api/mcp/inject", methods=["POST"])
+def mcp_set_inject():
+    """设置面板里的「MCP 工具注入」总开关。"""
+    import mcp_config
+
+    want = bool((request.get_json(silent=True) or {}).get("enabled"))
+    mcp_config.set_inject_enabled(want)
+    return jsonify({"ok": True, **_mcp_overview()})
 
 
 # ============ 设置：provider 密钥 / URL ============

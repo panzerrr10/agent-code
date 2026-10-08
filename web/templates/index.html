@@ -1975,6 +1975,121 @@
         body.dark .set-hint.warn { background: #2c2410; border-color: #4d3a10; color: #fbbf24; }
         body.dark .set-hint code { background: #232833; }
 
+        /* ===== MCP 插件 ===== */
+        .mcp-global {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12.5px;
+            margin-bottom: 10px;
+            cursor: pointer;
+        }
+
+        .mcp-list { display: flex; flex-direction: column; gap: 8px; }
+
+        .mcp-row {
+            border: 1px solid #eef0f3;
+            border-radius: 8px;
+            padding: 9px 11px;
+            background: #fbfbfd;
+        }
+
+        .mcp-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .mcp-name { font-size: 12.5px; font-weight: 600; color: #111827; }
+        .mcp-status { font-size: 11px; color: #6b7280; }
+
+        .mcp-meta { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 5px; }
+
+        .mcp-tag {
+            font-size: 10.5px;
+            background: #f3f4f6;
+            border-radius: 5px;
+            padding: 1px 6px;
+            color: #4b5563;
+        }
+
+        .mcp-tag.net { background: #fef3c7; color: #92400e; }
+
+        .mcp-tools { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+
+        .mcp-tools code {
+            font-size: 10.5px;
+            background: #eef2ff;
+            color: #3730a3;
+            border-radius: 4px;
+            padding: 1px 5px;
+        }
+
+        .mcp-err {
+            font-size: 11px;
+            color: #b91c1c;
+            background: #fef2f2;
+            border-radius: 5px;
+            padding: 5px 7px;
+            margin-top: 6px;
+            word-break: break-all;
+        }
+
+        .mcp-row-btns { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+
+        .mcp-actions { display: flex; gap: 8px; margin-top: 9px; }
+
+        .mcp-form {
+            margin-top: 11px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 11px;
+            background: #f9fafb;
+        }
+
+        .mcp-field {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 7px;
+        }
+
+        .mcp-field label {
+            font-size: 11.5px;
+            color: #4b5563;
+            width: 62px;
+            flex-shrink: 0;
+        }
+
+        .mcp-field input,
+        .mcp-field select {
+            flex: 1;
+            min-width: 0;
+            padding: 5px 8px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            font-size: 12px;
+        }
+
+        .mcp-net {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            margin: 9px 0;
+            cursor: pointer;
+        }
+
+        .mcp-form-btns { display: flex; gap: 8px; }
+
+        body.dark .mcp-row { background: #1b1f27; border-color: #2a2f3a; }
+        body.dark .mcp-name { color: #e5e7eb; }
+        body.dark .mcp-form { background: #1b1f27; border-color: #2a2f3a; }
+        body.dark .mcp-field input, body.dark .mcp-field select {
+            background: #232833; border-color: #333a47; color: #cbd5e1;
+        }
+
         /* ===== API Key 区 ===== */
         .key-list { display: flex; flex-direction: column; gap: 10px; }
 
@@ -2737,6 +2852,72 @@
                         浏览器永远拿不到完整值，只显示掩码。<br>
                         ⚠️ 改了 Base URL 就意味着密钥会被发到那个地址，请只填你信任的端点。<br>
                         这里填的优先于 <code>.env</code>；清空即回退到 <code>.env</code>。
+                    </p>
+                </section>
+
+                <section class="set-sec">
+                    <h4>🔌 MCP 插件</h4>
+                    <label class="mcp-global">
+                        <input type="checkbox" id="mcpInjectToggle" onchange="setMcpInject(this.checked)">
+                        <span>让 Agent 使用 MCP 工具</span>
+                        <span class="set-hint" style="margin: 0;">（关掉后插件仍然连着，只是不告诉模型）</span>
+                    </label>
+                    <div id="mcpServers" class="mcp-list"></div>
+                    <div class="mcp-actions">
+                        <button class="fp-btn" onclick="showMcpForm()">+ 添加插件</button>
+                        <button class="fp-btn" onclick="loadMcpServers()">↻ 刷新状态</button>
+                    </div>
+
+                    <div id="mcpForm" class="mcp-form" style="display: none;">
+                        <div class="mcp-field">
+                            <label>名称</label>
+                            <input type="text" id="mcpName" placeholder="filesystem（只能用字母数字_-）">
+                        </div>
+                        <div class="mcp-field">
+                            <label>启动命令</label>
+                            <input type="text" id="mcpCommand" placeholder="npx">
+                        </div>
+                        <div class="mcp-field">
+                            <label>参数</label>
+                            <input type="text" id="mcpArgs" placeholder="-y @modelcontextprotocol/server-filesystem /home/pz/下载">
+                            <span class="set-hint" style="margin: 0;">空格分隔</span>
+                        </div>
+                        <div class="mcp-field">
+                            <label>权限档位</label>
+                            <select id="mcpPermission">
+                                <option value="mutate">mutate · 每次调用都要我确认（默认）</option>
+                                <option value="read">read · 视为只读，不确认</option>
+                                <option value="execute">execute · 按命令类处理</option>
+                                <option value="internal">internal · 会话内部状态</option>
+                            </select>
+                        </div>
+                        <div class="mcp-field">
+                            <label>注入时机</label>
+                            <select id="mcpInject">
+                                <option value="auto">auto · 任务命中关键词才注入（省 token，默认）</option>
+                                <option value="always">always · 每次对话都注入</option>
+                                <option value="never">never · 不注入给模型</option>
+                            </select>
+                        </div>
+                        <div class="mcp-field">
+                            <label>关键词</label>
+                            <input type="text" id="mcpKeywords" placeholder="逗号分隔，auto 模式下用（留空则用名称与工具名）">
+                        </div>
+                        <label class="mcp-net">
+                            <input type="checkbox" id="mcpAllowNetwork">
+                            <span>🌐 允许该插件联网</span>
+                        </label>
+                        <div class="mcp-form-btns">
+                            <button class="fp-btn primary" onclick="saveMcpServer()">保存</button>
+                            <button class="fp-btn" onclick="hideMcpForm()">取消</button>
+                        </div>
+                    </div>
+
+                    <p class="set-hint warn">
+                        ⚠️ MCP 插件是<b>第三方程序，直接运行在你的电脑上</b>（不在 Docker 沙箱里），
+                        拥有和你同等的权限。只添加你信任的插件。<br>
+                        新插件默认<b>不启用</b>、默认<b>不允许联网</b>；联网必须在上面显式勾选。<br>
+                        插件的工具一律以 <code>mcp__名称__工具</code> 命名，不会覆盖内置工具。
                     </p>
                 </section>
 
@@ -4552,6 +4733,7 @@
         function openSettings() {
             document.getElementById("settingsModal").style.display = "flex";
             renderProviderKeys();
+            loadMcpServers();                      // MCP 插件
             loadDocuments();                       // 知识库列表
             if (!providersData.length) loadProviders();
             else { updateModelPickerUI(); MODEL_PICKER_TARGETS.forEach(t => renderModelPickerDropdown(t.dd)); }
@@ -4560,6 +4742,151 @@
 
         function closeSettings() {
             document.getElementById("settingsModal").style.display = "none";
+        }
+
+        // ===== MCP 插件 =====
+        let mcpData = { servers: [], inject_enabled: true };
+
+        async function loadMcpServers() {
+            try {
+                const res = await fetch("/api/mcp/servers");
+                const j = await res.json();
+                if (j.ok) { applyMcpData(j); }
+            } catch (e) {
+                console.warn("[MCP] 加载失败", e);
+            }
+        }
+
+        function applyMcpData(j) {
+            mcpData = { servers: j.servers || [], inject_enabled: j.inject_enabled !== false };
+            const t = document.getElementById("mcpInjectToggle");
+            if (t) t.checked = mcpData.inject_enabled;
+            renderMcpServers();
+        }
+
+        const MCP_STATUS_LABEL = {
+            ready: "🟢 已连接", connecting: "🟡 连接中", error: "🔴 连接失败",
+            idle: "⚪ 未启用", stopped: "⚪ 已停止",
+        };
+
+        function renderMcpServers() {
+            const box = document.getElementById("mcpServers");
+            if (!box) return;
+            if (!mcpData.servers.length) {
+                box.innerHTML = `<div class="set-hint">还没有插件。点下面的「添加插件」。</div>`;
+                return;
+            }
+            box.innerHTML = mcpData.servers.map(sv => {
+                const st = MCP_STATUS_LABEL[sv.runtime_status] || sv.runtime_status;
+                const tools = (sv.tools || []).length
+                    ? `<div class="mcp-tools">${sv.tools.map(t => `<code>${escapeHtml(t)}</code>`).join("")}</div>`
+                    : "";
+                const err = sv.runtime_error
+                    ? `<div class="mcp-err">${escapeHtml(sv.runtime_error.slice(0, 200))}</div>` : "";
+                const permLabel = { read: "只读", internal: "内部", mutate: "需确认", execute: "命令类" }[sv.permission] || sv.permission;
+                return `
+                <div class="mcp-row">
+                    <div class="mcp-head">
+                        <span class="mcp-name">${escapeHtml(sv.name)}</span>
+                        <span class="mcp-status">${st}${sv.tool_count ? " · " + sv.tool_count + " 个工具" : ""}</span>
+                    </div>
+                    <div class="mcp-meta">
+                        <span class="mcp-tag">${escapeHtml(permLabel)}</span>
+                        <span class="mcp-tag">${escapeHtml(sv.inject)}</span>
+                        ${sv.allow_network ? '<span class="mcp-tag net">🌐 已授权联网</span>' : '<span class="mcp-tag">🔒 不联网</span>'}
+                    </div>
+                    ${tools}${err}
+                    <div class="mcp-row-btns">
+                        <button class="fp-btn" onclick="toggleMcpServer('${escapeHtml(sv.name)}', ${!sv.enabled})">
+                            ${sv.enabled ? "停用" : "启用"}</button>
+                        <button class="fp-btn" onclick="reconnectMcpServer('${escapeHtml(sv.name)}')"
+                            ${sv.enabled ? "" : "disabled"}>重连</button>
+                        <button class="fp-btn" onclick="editMcpServer('${escapeHtml(sv.name)}')">编辑</button>
+                        <button class="fp-btn danger" onclick="deleteMcpServer('${escapeHtml(sv.name)}')">删除</button>
+                    </div>
+                </div>`;
+            }).join("");
+        }
+
+        async function mcpPost(url, body) {
+            const res = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body || {}),
+            });
+            const j = await res.json();
+            if (!j.ok) { alert(j.error || j.message || "操作失败"); return null; }
+            applyMcpData(j);
+            return j;
+        }
+
+        function toggleMcpServer(name, enable) {
+            if (enable && !confirm(
+                `启用 MCP 插件「${name}」？\n\n它会作为一个程序运行在你的电脑上，` +
+                `拥有和你同等的文件权限。只启用你信任的插件。`)) return;
+            mcpPost(`/api/mcp/servers/${encodeURIComponent(name)}/enabled`, { enabled: enable })
+                .then(j => { if (j && j.message) console.log("[MCP]", j.message); });
+        }
+
+        function reconnectMcpServer(name) {
+            mcpPost(`/api/mcp/servers/${encodeURIComponent(name)}/reconnect`, {});
+        }
+
+        function deleteMcpServer(name) {
+            if (!confirm(`删除插件「${name}」？（会断开连接）`)) return;
+            fetch(`/api/mcp/servers/${encodeURIComponent(name)}`, { method: "DELETE" })
+                .then(r => r.json())
+                .then(j => { if (j.ok) applyMcpData(j); else alert(j.error || "删除失败"); });
+        }
+
+        function setMcpInject(enabled) {
+            mcpPost("/api/mcp/inject", { enabled });
+        }
+
+        function showMcpForm(prefill) {
+            const f = document.getElementById("mcpForm");
+            f.style.display = "block";
+            const v = prefill || { name: "", command: "", args: [], permission: "mutate", inject: "auto", keywords: [], allow_network: false };
+            document.getElementById("mcpName").value = v.name || "";
+            document.getElementById("mcpName").readOnly = !!prefill;   // 改名会丢注册，禁止
+            document.getElementById("mcpCommand").value = v.command || "";
+            document.getElementById("mcpArgs").value = (v.args || []).join(" ");
+            document.getElementById("mcpPermission").value = v.permission || "mutate";
+            document.getElementById("mcpInject").value = v.inject || "auto";
+            document.getElementById("mcpKeywords").value = (v.keywords || []).join(",");
+            document.getElementById("mcpAllowNetwork").checked = !!v.allow_network;
+        }
+
+        function hideMcpForm() { document.getElementById("mcpForm").style.display = "none"; }
+
+        function editMcpServer(name) {
+            const sv = mcpData.servers.find(x => x.name === name);
+            if (sv) showMcpForm(sv);
+        }
+
+        async function saveMcpServer() {
+            const name = document.getElementById("mcpName").value.trim();
+            const args = document.getElementById("mcpArgs").value.trim();
+            const allowNet = document.getElementById("mcpAllowNetwork").checked;
+            if (allowNet && !confirm(
+                `允许「${name}」联网？\n\n这意味着它可以把数据发到外部服务器。`)) {
+                document.getElementById("mcpAllowNetwork").checked = false;
+                return;
+            }
+            const body = {
+                name,
+                transport: "stdio",
+                command: document.getElementById("mcpCommand").value.trim(),
+                // 参数按空格切分；带空格的路径请用引号
+                args: args ? args.match(/(?:[^\s"]+|"[^"]*")+/g).map(a => a.replace(/^"|"$/g, "")) : [],
+                permission: document.getElementById("mcpPermission").value,
+                inject: document.getElementById("mcpInject").value,
+                keywords: document.getElementById("mcpKeywords").value.split(",").map(k => k.trim()).filter(Boolean),
+                allow_network: allowNet,
+                enabled: (mcpData.servers.find(x => x.name === name) || {}).enabled || false,
+            };
+            const j = await mcpPost("/api/mcp/servers", body);
+            if (j) hideMcpForm();
         }
 
         /** 密钥区：只展示掩码，**任何时刻都不把完整密钥写进 DOM**。 */

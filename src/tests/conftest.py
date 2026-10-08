@@ -25,6 +25,8 @@ _TMP_DIR = tempfile.mkdtemp(prefix="agentcode-test-")
 os.environ.setdefault("AGENT_DB_PATH", os.path.join(_TMP_DIR, "chat.db"))
 # 界面里填的 provider 密钥也要落到临时目录，否则测试会写进真实的 data/providers.json
 os.environ.setdefault("AGENT_SETTINGS_PATH", os.path.join(_TMP_DIR, "providers.json"))
+# MCP 插件配置同理：测试不能读写真实的 data/mcp.json
+os.environ.setdefault("AGENT_MCP_PATH", os.path.join(_TMP_DIR, "mcp.json"))
 
 import pytest  # noqa: E402
 

@@ -180,6 +180,25 @@ def _confirm_event(func_name: str, args: dict, token: str) -> dict:
     """
     import os as _os
 
+    # MCP 插件工具：落到下面通用的 else 分支会显示成「mcp__x__y {'a': 1}」，
+    # 用户根本看不懂。这里单独给一张能读的卡片：哪个 server、哪个工具、参数是什么。
+    if isinstance(func_name, str) and func_name.startswith("mcp__"):
+        import json as _json
+
+        import mcp_client
+
+        entry = mcp_client.resolve(func_name)
+        server, tool = entry if entry else ("?", func_name)
+        try:
+            pretty = _json.dumps(args or {}, ensure_ascii=False, indent=2)
+        except Exception:
+            pretty = str(args)
+        return {
+            "type": "confirm_command",
+            "cmd": f"[MCP 插件] {server} → {tool}\n参数：\n{pretty[:600]}",
+            "confirm_token": token,
+        }
+
     if func_name == "delete_file":
         return {
             "type": "confirm_delete",

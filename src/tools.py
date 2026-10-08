@@ -471,6 +471,15 @@ DEFAULT_PERMISSION_KIND = "mutate"
 
 
 def tool_permission_kind(name: str) -> str:
+    # MCP 工具的危险档位由「用户对该 server 的标注」决定，默认 mutate（要确认）。
+    # 注意：**不采信 server 自己声明的 readOnlyHint** —— 那是第三方自述，
+    # 恶意 server 完全可以给破坏性工具标成只读来绕过确认。
+    if isinstance(name, str) and name.startswith("mcp__"):
+        try:
+            import mcp_client
+            return mcp_client.permission_kind(name)
+        except Exception:                                       # noqa: BLE001
+            return "mutate"
     return TOOL_PERMISSION.get(name, DEFAULT_PERMISSION_KIND)
 
 
@@ -1770,6 +1779,57 @@ EXTENDED_TOOLS = [
 ]
 
 
+# ===== MCP 插件工具（外部 server 提供）=====
+# 注入是「按需」的：默认只有在任务里出现该 server 的名字/工具名/自定义关键词时才注入。
+# 原因很实际 —— schema 是**每一步**都重发的，常驻注入等于按步数反复付钱。
+def _mcp_tools_for_task(task_lower: str) -> list:
+    try:
+        import mcp_client
+        import mcp_config
+    except Exception:
+        return []
+
+    try:
+        if not mcp_config.load_config().get("inject_enabled", True):
+            return []          # 设置面板里的总开关关掉了
+        schemas = mcp_client.tool_schemas()
+    except Exception:
+        return []
+
+    if not schemas:
+        return []
+
+    # 按 server 分组，逐 server 判断要不要注入
+    by_server = {}
+    for sc in schemas:
+        entry = mcp_client.resolve(sc["function"]["name"])
+        if entry:
+            by_server.setdefault(entry[0], []).append(sc)
+
+    picked = []
+    for name, items in by_server.items():
+        cfg = mcp_config.get_server(name) or {}
+        if not cfg.get("enabled"):
+            continue
+        mode = cfg.get("inject") or "auto"
+        if mode == "never":
+            continue
+        if mode == "always":
+            picked.extend(items)
+            continue
+        # auto：server 名 / 工具名 / 自定义关键词命中才注入
+        words = {name.lower()}
+        words.update(str(k).lower() for k in (cfg.get("keywords") or []))
+        for sc in items:
+            fn = sc["function"]["name"]
+            words.add(fn.lower())
+            tool_part = fn.split("__")[-1] if "__" in fn else fn
+            words.add(tool_part.lower().replace("_", " "))
+        if any(w and w in task_lower for w in words):
+            picked.extend(items)
+    return picked
+
+
 def get_tools_schema(task: str = "", full: bool = False):
     """
     根据任务选工具。
@@ -1777,7 +1837,9 @@ def get_tools_schema(task: str = "", full: bool = False):
     - 默认：核心组 + 基础读工具 + 中文/英文关键词匹配 + 场景预置
     """
     if full:
-        return TOOLS_SCHEMA
+        # 多 Agent 是「全发」，MCP 工具也要带上（仍受注入总开关与每 server 的注入模式约束）。
+        # 之前这里直接 return，导致多 Agent 模式下 MCP 工具永远不可见。
+        return TOOLS_SCHEMA + _mcp_tools_for_task((task or "").lower())
 
     # 默认核心组
     selected = set(CORE_TOOLS)
@@ -1852,7 +1914,8 @@ def get_tools_schema(task: str = "", full: bool = False):
         selected.update(["create_plan", "update_plan", "get_plan"])
 
     # 过滤
-    return [t for t in TOOLS_SCHEMA if t["function"]["name"] in selected]
+    builtin = [t for t in TOOLS_SCHEMA if t["function"]["name"] in selected]
+    return builtin + _mcp_tools_for_task(task_lower)
 
 
 # ============ 工具名 → 函数 映射 ============
@@ -1895,8 +1958,22 @@ __all__ = [
 ]
 
 
+# 供 agent.py 使用：判断一个工具是不是内置的（用于 MCP 分支前的短路）
+def is_builtin_tool(name: str) -> bool:
+    return name in TOOL_FUNCTIONS
+
+
 def execute_tool(name: str, args: dict) -> str:
-    """执行工具"""
+    """执行工具。**全项目唯一的工具派发入口** —— MCP 工具也从这里走，
+    因此权限闸门、失败熔断、SSE 事件、前端执行详情全部自动复用。"""
+    # MCP 插件工具：交给 MCP 客户端（异步桥接在 mcp_client 内部完成）
+    if isinstance(name, str) and name.startswith("mcp__"):
+        try:
+            import mcp_client
+            return mcp_client.call_tool(name, args or {})
+        except Exception as e:                                  # noqa: BLE001
+            return f"❌ MCP 工具调用失败：{e}"
+
     if name not in TOOL_FUNCTIONS:
         return f"❌ 未知工具：{name}"
     try:
