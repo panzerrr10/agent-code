@@ -62,6 +62,13 @@ wait_ready() {
 
 port_open() { (exec 3<>"/dev/tcp/127.0.0.1/${PORT}") >/dev/null 2>&1; }
 
+# 当前还剩几个本应用的窗口（XWayland 下按 WM_CLASS 统计）
+window_count() {
+    local n
+    n="$(xwininfo -root -tree 2>/dev/null | grep -c "\"$CLASS\"" || true)"
+    printf '%s' "${n:-0}"
+}
+
 server_pids() {
     # 找出服务进程。两个坑：
     #  1. PID 文件里记的可能是 setsid 包装层的 pid，与真实 python 不同 → 一并按命令行兜底
@@ -165,12 +172,38 @@ mkdir -p "$PROFILE_DIR"
 # --ozone-platform=x11 是刻意的：Wayland 下 Chromium 的 app_id 来自 profile，
 # --class 不起作用，GNOME 会把窗口归到 Chromium 名下；走 XWayland 时 --class
 # 才真正设置 WM_CLASS，从而和 .desktop 的 StartupWMClass=agent-code 对上。
-exec "$CHROME" \
-    --app="$BASE/" \
-    --class="$CLASS" \
-    --ozone-platform=x11 \
-    --user-data-dir="$PROFILE_DIR" \
-    --no-first-run \
-    --no-default-browser-check \
-    --disable-features=Translate,MediaRouter,OptimizationHints \
-    --hide-crash-restore-bubble
+open_window() {
+    "$CHROME" \
+        --app="$BASE/" \
+        --class="$CLASS" \
+        --ozone-platform=x11 \
+        --user-data-dir="$PROFILE_DIR" \
+        --no-first-run \
+        --no-default-browser-check \
+        --disable-features=Translate,MediaRouter,OptimizationHints \
+        --hide-crash-restore-bubble
+}
+
+# 窗口关掉后收尾：只剩「启动器自己拉起来的服务」才停，
+# 手动在终端跑的服务不动（那种情况不会有 PID 文件）。
+cleanup_after_window() {
+    [ "${AGENT_CODE_KEEP_SERVER:-0}" = "1" ] && { log "按 AGENT_CODE_KEEP_SERVER=1 保留服务"; return; }
+    [ -f "$PIDFILE" ] || return
+    if [ "$(window_count)" != "0" ]; then
+        log "仍有其它窗口在运行，保留服务"
+        return
+    fi
+    local pids
+    pids="$(server_pids)"
+    if [ -n "${pids// /}" ]; then
+        # shellcheck disable=SC2086
+        kill $pids 2>/dev/null || true
+        log "窗口已关闭，后台服务已停止 (pid: $pids)"
+    fi
+    rm -f "$PIDFILE"
+}
+
+open_window
+CHROME_RC=$?
+cleanup_after_window
+exit $CHROME_RC

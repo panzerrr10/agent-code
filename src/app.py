@@ -746,6 +746,40 @@ def api_trash_restore():
     return jsonify({"ok": False, "message": message}), 400
 
 
+@app.route("/api/trash/purge", methods=["POST"])
+def api_trash_purge_many():
+    """批量彻底删除回收站记录（前端「删除选中 / 清空」用）。
+
+    单条失败不影响其余条目，返回实际删除数与失败原因，便于前端如实提示。
+    """
+    import trash as _trash
+
+    data = request.json or {}
+    ids = data.get("ids")
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"ok": False, "removed": 0, "message": "未选择任何条目"}), 400
+
+    removed, failed = 0, []
+    for entry_id in ids:
+        ok, msg = _trash.purge(str(entry_id))
+        if ok:
+            removed += 1
+        else:
+            failed.append(msg)
+
+    message = f"已彻底删除 {removed} 条"
+    if failed:
+        message += f"，{len(failed)} 条失败"
+    return jsonify(
+        {
+            "ok": removed > 0,
+            "removed": removed,
+            "failed": failed,
+            "message": message,
+        }
+    )
+
+
 @app.route("/api/trash/<path:entry_id>", methods=["DELETE"])
 def api_trash_purge(entry_id):
     """彻底删除某条回收站记录（不可恢复）。"""

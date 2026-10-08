@@ -169,3 +169,63 @@ def test_list_entries_sorted_newest_first(work):
     assert len(entries) == 3
     # mtime 可能同秒，这里只要求列表长度与可恢复性正确
     assert all(e["restorable"] for e in entries)
+
+
+# ============ 批量删除（前端「删除选中」）============
+
+
+def _make_entries(work, n=3):
+    for i in range(n):
+        target = os.path.join(work, f"bulk{i}.txt")
+        _write(target, str(i))
+        trash.backup_file(target, kind="edit")
+    return [e["id"] for e in trash.list_entries()]
+
+
+def test_bulk_purge_removes_all_selected(work, client):
+    ids = _make_entries(work, 3)
+    assert len(ids) == 3
+
+    resp = client.post("/api/trash/purge", json={"ids": ids})
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["ok"] is True
+    assert body["removed"] == 3
+    assert trash.list_entries() == []
+    # sidecar 也要一起清掉，否则会留下孤儿元数据
+    assert os.listdir(trash.TRASH_DIR) == []
+
+
+def test_bulk_purge_keeps_unselected(work, client):
+    ids = _make_entries(work, 4)
+    keep = ids[0]
+
+    resp = client.post("/api/trash/purge", json={"ids": ids[1:]})
+    assert resp.get_json()["removed"] == 3
+    assert [e["id"] for e in trash.list_entries()] == [keep]
+
+
+def test_bulk_purge_reports_partial_failure(work, client):
+    """单条失败不能中断整批，要如实返回成功/失败数。"""
+    ids = _make_entries(work, 2)
+    resp = client.post("/api/trash/purge", json={"ids": ids + ["不存在.txt"]})
+    body = resp.get_json()
+    assert body["removed"] == 2
+    assert body["failed"], "失败条目应被报告"
+    assert "1 条失败" in body["message"]
+    assert trash.list_entries() == []
+
+
+def test_bulk_purge_rejects_empty_selection(work, client):
+    for payload in ({"ids": []}, {}, {"ids": "not-a-list"}):
+        resp = client.post("/api/trash/purge", json=payload)
+        assert resp.status_code == 400, payload
+        assert resp.get_json()["ok"] is False
+
+
+def test_bulk_purge_rejects_path_traversal(work, client):
+    ids = _make_entries(work, 1)
+    resp = client.post("/api/trash/purge", json={"ids": ["../evil"] + ids})
+    body = resp.get_json()
+    assert body["removed"] == 1
+    assert body["failed"], "目录穿越条目必须失败而不是被静默接受"

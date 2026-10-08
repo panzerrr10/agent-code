@@ -204,21 +204,20 @@
 
         body {
             font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
-            background: var(--bg-page);
+            background: var(--bg-app);
+            /* 独立窗口里要铺满：不再居中、不再留内边距 */
+            margin: 0;
             height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
+            overflow: hidden;
         }
 
         .app {
+            /* 原来是「页面中央一张 max-width:1100px / 92vh 的卡片」，
+               在浏览器标签页里好看，但装进独立窗口就会四周留大片空白。
+               现在直接撑满视口。 */
             width: 100%;
-            max-width: 1100px;
-            height: 92vh;
+            height: 100vh;
             background: var(--bg-app);
-            border-radius: 16px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
             display: flex;
             flex-direction: column;
             overflow: hidden;
@@ -1054,6 +1053,48 @@
             font-size: 13px;
         }
 
+        .trash-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 18px;
+            border-bottom: 1px solid #eef0f3;
+            background: #fff;
+        }
+
+        .trash-pickall {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 12px;
+            color: #374151;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .trash-selinfo {
+            flex: 1;
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .trash-check {
+            width: 15px;
+            height: 15px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .trash-btn.danger {
+            background: #ef4444;
+            color: #fff;
+            border-color: #ef4444;
+        }
+
+        .trash-btn.danger:hover:not(:disabled) {
+            background: #dc2626;
+        }
+
         /* 任务计划面板 */
         .plan-panel {
             background: #fff8e1;
@@ -1745,6 +1786,19 @@
             <div class="trash-hint">
                 每次覆盖写入 / 编辑 / 批量编辑 / 删除前都会在这里留一份备份。
                 点「恢复」会写回它原来的路径；若目标已存在，会先把现状也备份一份，所以恢复本身也能撤回。
+            </div>
+            <div class="trash-toolbar">
+                <label class="trash-pickall">
+                    <input type="checkbox" id="trashSelectAll" onchange="toggleTrashSelectAll(this.checked)">
+                    <span>全选</span>
+                </label>
+                <span class="trash-selinfo" id="trashSelInfo">未选择</span>
+                <button class="trash-btn" id="trashBulkRestoreBtn" onclick="restoreSelectedTrash()" disabled>
+                    ↩ 恢复选中
+                </button>
+                <button class="trash-btn danger" id="trashBulkDelBtn" onclick="purgeSelectedTrash()" disabled>
+                    🗑 删除选中
+                </button>
             </div>
             <div class="trash-list" id="trashList"></div>
         </div>
@@ -2958,9 +3012,35 @@
             await renderTrash();
         }
 
+        // 当前选中的回收站条目 id（每次重新渲染都会清空）
+        let trashSelected = new Set();
+
+        function updateTrashSelectionUI() {
+            const info = document.getElementById("trashSelInfo");
+            const all = document.getElementById("trashSelectAll");
+            const boxes = [...document.querySelectorAll(".trash-check")];
+            const n = trashSelected.size;
+            info.textContent = n ? `已选 ${n} 项` : "未选择";
+            document.getElementById("trashBulkDelBtn").disabled = n === 0;
+            document.getElementById("trashBulkRestoreBtn").disabled = n === 0;
+            if (all) {
+                all.checked = boxes.length > 0 && n === boxes.length;
+                all.indeterminate = n > 0 && n < boxes.length;
+            }
+        }
+
+        function toggleTrashSelectAll(checked) {
+            trashSelected = checked
+                ? new Set([...document.querySelectorAll(".trash-check")].map(b => b.dataset.id))
+                : new Set();
+            document.querySelectorAll(".trash-check").forEach(b => { b.checked = checked; });
+            updateTrashSelectionUI();
+        }
+
         async function renderTrash() {
             const list = document.getElementById("trashList");
             const sub = document.getElementById("trashSub");
+            trashSelected = new Set();
             list.innerHTML = `<div class="trash-empty">加载中…</div>`;
             try {
                 const res = await fetch("/api/trash");
@@ -2971,11 +3051,14 @@
                     : "";
                 if (!entries.length) {
                     list.innerHTML = `<div class="trash-empty">回收站是空的</div>`;
+                    updateTrashSelectionUI();
                     return;
                 }
                 // 用 data-* + 事件委托，避免把文件名拼进 onclick 造成注入
                 list.innerHTML = entries.map(e => `
                     <div class="trash-item">
+                        <input type="checkbox" class="trash-check" data-id="${escapeHtml(e.id)}"
+                            title="选中以批量操作">
                         <span class="trash-kind">${escapeHtml(e.kind_label)}</span>
                         <div class="trash-meta">
                             <div class="trash-path" title="${escapeHtml(e.original_path || e.name)}">
@@ -2987,6 +3070,7 @@
                             ${e.restorable ? "" : "disabled"}>恢复</button>
                         <button class="trash-btn" data-action="purge" data-id="${escapeHtml(e.id)}">彻底删除</button>
                     </div>`).join("");
+                updateTrashSelectionUI();
             } catch (e) {
                 list.innerHTML = `<div class="trash-empty">加载失败：${escapeHtml(e.message)}</div>`;
             }
@@ -3011,6 +3095,26 @@
             await loadTrashSummary();
         }
 
+        async function restoreSelectedTrash() {
+            const ids = [...trashSelected];
+            if (!ids.length) return;
+            if (!confirm(`把选中的 ${ids.length} 条备份恢复到各自的原路径？`)) return;
+            let ok = 0, fail = 0;
+            for (const id of ids) {
+                try {
+                    const res = await fetch("/api/trash/restore", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ id }),
+                    });
+                    (await res.json()).ok ? ok++ : fail++;
+                } catch (e) { fail++; }
+            }
+            alert(`恢复完成：成功 ${ok} 条${fail ? `，失败 ${fail} 条` : ""}`);
+            await renderTrash();
+            await loadTrashSummary();
+        }
+
         async function purgeTrashEntry(id, btn) {
             if (!confirm("彻底删除这条备份？此操作不可恢复。")) return;
             btn.disabled = true;
@@ -3019,6 +3123,28 @@
                 const res = await fetch(`/api/trash/${encodeURIComponent(id)}`, { method: "DELETE" });
                 const j = await res.json();
                 if (!j.ok) alert(j.message || "删除失败");
+            } catch (e) {
+                alert("删除失败：" + e.message);
+            }
+            await renderTrash();
+            await loadTrashSummary();
+        }
+
+        async function purgeSelectedTrash() {
+            const ids = [...trashSelected];
+            if (!ids.length) return;
+            if (!confirm(`彻底删除选中的 ${ids.length} 条备份？此操作不可恢复。`)) return;
+            const btn = document.getElementById("trashBulkDelBtn");
+            btn.disabled = true;
+            btn.textContent = "删除中…";
+            try {
+                const res = await fetch("/api/trash/purge", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ids }),
+                });
+                const j = await res.json();
+                alert(j.message || (j.ok ? "已删除" : "删除失败"));
             } catch (e) {
                 alert("删除失败：" + e.message);
             }
@@ -3035,6 +3161,13 @@
                 const id = btn.dataset.id;
                 if (btn.dataset.action === "restore") restoreTrashEntry(id, btn);
                 else if (btn.dataset.action === "purge") purgeTrashEntry(id, btn);
+            });
+            // 勾选框用 change 事件（click 在键盘操作下不一定触发）
+            list.addEventListener("change", (ev) => {
+                const box = ev.target.closest(".trash-check");
+                if (!box) return;
+                box.checked ? trashSelected.add(box.dataset.id) : trashSelected.delete(box.dataset.id);
+                updateTrashSelectionUI();
             });
         })();
 
@@ -3300,6 +3433,11 @@
         loadSessions();
         loadDocuments();
         loadTrashSummary();
+
+        // 支持用 #trash 直接打开回收站（方便做书签或桌面快捷方式）
+        if (location.hash === "#trash") {
+            openTrash();
+        }
         // ===== 输入框自动长高 =====
         const inputEl = document.getElementById("task");
 
