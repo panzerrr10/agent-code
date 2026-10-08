@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+# agent-code —— 独立窗口启动器（可固定到 GNOME Dock）
+#
+# 做三件事：
+#   1. 若 5004 端口上没有本应用在跑，就后台起 `src/app.py` 并等它真的能响应
+#   2. 用 Chromium 的 app 模式打开一个无地址栏窗口，窗口类名固定为 agent-code
+#   3. 交给 .desktop 里的 StartupWMClass=agent-code 匹配，这样 Dock 显示本应用图标
+#
+# 用法：
+#   agent-code-app            启动（已在跑则直接开窗口）
+#   agent-code-app --stop     停掉后台服务
+#   agent-code-app --status   看服务状态
+#   agent-code-app --log      跟踪服务日志
+#
+# 环境变量：AGENT_CODE_PORT（默认 5004）、AGENT_CODE_PROJECT（默认下面的 PROJECT）
+
+set -uo pipefail
+
+PROJECT="${AGENT_CODE_PROJECT:-/home/pz/PycharmProjects/agent-code-copy}"
+PORT="${AGENT_CODE_PORT:-5004}"
+BASE="http://127.0.0.1:${PORT}"
+CLASS="agent-code"
+PY="$PROJECT/.venv/bin/python"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/agent-code"
+LOG="$STATE_DIR/server-${PORT}.log"
+PIDFILE="$STATE_DIR/server-${PORT}.pid"
+MARKER="AI Agent"          # 页面里必然出现的字符串，用来确认「这个端口上跑的确实是本应用」
+
+mkdir -p "$STATE_DIR"
+
+notify() { command -v notify-send >/dev/null 2>&1 && notify-send -a "AI Agent" "$1" "${2:-}" || true; }
+log()    { printf '[agent-code] %s\n' "$*"; }
+
+http_code() {
+    # 注意：curl 连不上时会由 -w 输出 "000" 且退出码非 0，
+    # 若再写 `|| printf '000'` 就会拼成 "000000"，把空闲端口误判成「被占用」
+    local code
+    code="$(curl -s -o /dev/null -m 3 -w '%{http_code}' "$BASE/" 2>/dev/null || true)"
+    case "$code" in ''|000) printf '000' ;; *) printf '%s' "$code" ;; esac
+}
+
+# 端口通 ≠ 是我们的应用：必须校验页面内容，否则会静默连到别的（或过期的）服务上
+app_alive() {
+    # 刻意不写成 `curl ... | grep -q`：grep -q 命中即退出会让 curl 收到 SIGPIPE
+    # 返回非 0，配上 `set -o pipefail` 整条管道就被判为失败（曾导致误报「端口被占用」）
+    local body
+    body="$(curl -s -m 3 "$BASE/" 2>/dev/null || true)"
+    case "$body" in
+        *"$MARKER"*) return 0 ;;
+        *)           return 1 ;;
+    esac
+}
+
+wait_ready() {
+    local i
+    for i in $(seq 1 120); do
+        app_alive && return 0
+        sleep 0.25
+    done
+    return 1
+}
+
+port_open() { (exec 3<>"/dev/tcp/127.0.0.1/${PORT}") >/dev/null 2>&1; }
+
+server_pids() {
+    # 找出服务进程。两个坑：
+    #  1. PID 文件里记的可能是 setsid 包装层的 pid，与真实 python 不同 → 一并按命令行兜底
+    #  2. `pgrep -f` 会匹配到「命令行里恰好含该字符串」的任意进程（比如正在跑本脚本的
+    #     shell），必须再用 /proc/<pid>/comm 确认它确实是 python，否则会把自己杀掉
+    local pid comm out=""
+    if [ -f "$PIDFILE" ]; then
+        pid="$(cat "$PIDFILE" 2>/dev/null || true)"
+        if [ -n "$pid" ] && [ -r "/proc/$pid/comm" ]; then
+            case "$(cat "/proc/$pid/comm" 2>/dev/null)" in
+                python|python3) out="$out $pid" ;;
+            esac
+        fi
+    fi
+    for pid in $(pgrep -f "src/app\.py" 2>/dev/null || true); do
+        comm="$(cat "/proc/$pid/comm" 2>/dev/null || true)"
+        case "$comm" in
+            python|python3) out="$out $pid" ;;
+        esac
+    done
+    printf '%s' "$out" | tr ' ' '\n' | sed '/^$/d' | sort -u | tr '\n' ' '
+}
+
+stop_server() {
+    local pids
+    pids="$(server_pids)"
+    if [ -z "${pids// /}" ]; then
+        log "没有正在运行的服务"
+        rm -f "$PIDFILE"
+        exit 0
+    fi
+    # shellcheck disable=SC2086
+    kill $pids 2>/dev/null || true
+    # 给它 5 秒优雅退出，超时再强杀，避免留下僵尸服务
+    local i
+    for i in $(seq 1 20); do
+        port_open && sleep 0.25 || break
+    done
+    if port_open; then
+        # shellcheck disable=SC2086
+        kill -9 $pids 2>/dev/null || true
+        sleep 1
+        log "已强制停止服务 (pid: $pids)"
+    else
+        log "已停止服务 (pid: $pids)"
+    fi
+    rm -f "$PIDFILE"
+    exit 0
+}
+
+case "${1:-}" in
+    --stop)   stop_server ;;
+    --status)
+        if app_alive; then log "运行中：$BASE (pid $(server_pids))"
+        elif [ "$(http_code)" != "000" ]; then log "端口 $PORT 被其它程序占用（非本应用）"
+        else log "未运行"; fi
+        exit 0 ;;
+    --log)    exec tail -f "$LOG" ;;
+esac
+
+# ---------- 1. 确保服务在跑 ----------
+if app_alive; then
+    log "复用已在运行的服务：$BASE"
+elif [ "$(http_code)" != "000" ]; then
+    notify "端口 ${PORT} 被占用" "该端口上的服务不是 agent-code，请先释放它"
+    log "❌ $BASE 上响应的不是本应用（页面里找不到 \"$MARKER\"）"
+    exit 1
+else
+    [ -x "$PY" ] || { notify "找不到虚拟环境" "缺少 $PROJECT/.venv"; log "❌ $PY 不存在"; exit 1; }
+    : >"$LOG"
+    log "启动服务：$PY src/app.py（日志 $LOG）"
+    # 不要用 `$!` 记 pid：setsid 会 fork，包装层与真实 python 往往不是同一个 pid，
+    # 导致 --stop 杀掉包装层却留下服务。改为就绪后按命令行反查真实 pid。
+    ( cd "$PROJECT" && setsid nohup "$PY" src/app.py >>"$LOG" 2>&1 & )
+    if ! wait_ready; then
+        notify "服务启动失败" "查看日志：$LOG"
+        log "❌ 启动超时，日志尾部："
+        tail -n 15 "$LOG" >&2
+        exit 1
+    fi
+    log "服务就绪：$BASE"
+    # 就绪后反查真实 pid 存档（供 --status / --stop 使用）
+    server_pids | tr -d ' ' >"$PIDFILE" || true
+fi
+
+# ---------- 2. 准备 Chromium ----------
+CHROME="$(command -v chromium || command -v chromium-browser || command -v google-chrome || true)"
+if [ -z "$CHROME" ]; then
+    notify "未找到 Chromium" "请先运行：sudo snap install chromium"
+    exit 1
+fi
+
+# snap 版 Chromium 读不到 $HOME 下的隐藏目录，profile 必须放在 snap 可见的位置
+case "$CHROME" in
+    /snap/*|*/snap/bin/*) PROFILE_DIR="$HOME/snap/chromium/common/agent-code-profile" ;;
+    *)                    PROFILE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/agent-code/chromium-profile" ;;
+esac
+mkdir -p "$PROFILE_DIR"
+
+# ---------- 3. 开独立窗口 ----------
+# --ozone-platform=x11 是刻意的：Wayland 下 Chromium 的 app_id 来自 profile，
+# --class 不起作用，GNOME 会把窗口归到 Chromium 名下；走 XWayland 时 --class
+# 才真正设置 WM_CLASS，从而和 .desktop 的 StartupWMClass=agent-code 对上。
+exec "$CHROME" \
+    --app="$BASE/" \
+    --class="$CLASS" \
+    --ozone-platform=x11 \
+    --user-data-dir="$PROFILE_DIR" \
+    --no-first-run \
+    --no-default-browser-check \
+    --disable-features=Translate,MediaRouter,OptimizationHints \
+    --hide-crash-restore-bubble
