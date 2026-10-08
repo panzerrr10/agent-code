@@ -609,7 +609,10 @@
         .model-picker-dropdown {
             display: none;
             position: absolute;
-            bottom: calc(100% + 6px);
+            /* 默认向下弹；下方空间不够时由 JS 加 .drop-up 翻上去
+               （方向不再按控件写死——之前就是那样漏掉了多 Agent 的角色选择器） */
+            top: calc(100% + 6px);
+            bottom: auto;
             left: 0;
             min-width: 280px;
             max-height: 400px;
@@ -624,6 +627,13 @@
 
         .model-picker-dropdown.show {
             display: block;
+        }
+
+        /* 下方空间不够时翻到上方（由 positionDropdown() 决定） */
+        .model-picker-dropdown.drop-up,
+        .role-picker-dropdown.drop-up {
+            top: auto;
+            bottom: calc(100% + 6px);
         }
 
         .provider-group {
@@ -743,7 +753,8 @@
         .role-picker-dropdown {
             display: none;
             position: absolute;
-            bottom: calc(100% + 6px);
+            top: calc(100% + 6px);
+            bottom: auto;
             left: 0;
             min-width: 240px;
             max-height: 360px;
@@ -2033,25 +2044,9 @@
             text-overflow: ellipsis;
         }
 
-        /* 输入框在窗口底部，下拉必须向上弹 */
-        .model-picker.compact .model-picker-dropdown {
-            bottom: calc(100% + 6px);
-            top: auto;
-            left: 0;
-        }
-
-        /*
-         * 设置面板里的下拉要**向下**弹。
-         * 基础样式是 bottom:100%（向上），那是给窗口底部的输入框设计的；
-         * 设置面板里模型框上面就是分区标题，向上弹会盖住内容看不清。
-         * 这里放在「大模型」分区（面板最上方），下方空间充足。
-         */
+        /* 方向统一交给 positionDropdown() 自适应，这里不再按控件写死 */
         #settingsModelPicker .model-picker-dropdown {
-            top: calc(100% + 6px);
-            bottom: auto;
-            left: 0;
             min-width: 240px;
-            max-height: 260px;
         }
 
         body.dark .model-picker.compact > button { background: #232833; color: #cbd5e1; }
@@ -4905,6 +4900,23 @@
             });
         }
 
+        /**
+         * 下拉方向自适应：默认向下弹，下方空间不够就翻到上方。
+         *
+         * 之所以改成统一计算：之前是「每个下拉各自写死方向」，结果修好了单 Agent 的
+         * 模型选择框、却漏了多 Agent 的三个角色选择器（它们用的是另一个 class
+         * .role-picker-dropdown）。改成按可用空间算，以后把下拉挪到哪儿都不会错。
+         */
+        function positionDropdown(dd, anchorEl) {
+            const anchor = anchorEl || (dd && dd.parentElement);
+            if (!dd || !anchor) return;
+            dd.classList.remove("drop-up");        // 先按"向下"量高度
+            const rect = anchor.getBoundingClientRect();
+            const roomBelow = window.innerHeight - rect.bottom;
+            const need = Math.min(dd.scrollHeight || 260, 340) + 14;
+            if (roomBelow < need) dd.classList.add("drop-up");
+        }
+
         function toggleModelPicker(event, dropdownId) {
             if (event) event.stopPropagation();
             const targetId = dropdownId || "modelPickerDropdown";
@@ -4916,7 +4928,12 @@
                 }
             });
             const dd = document.getElementById(targetId);
-            if (dd) dd.classList.toggle("show");
+            if (!dd) return;
+            dd.classList.toggle("show");
+            if (dd.classList.contains("show")) {
+                const btn = dd.parentElement.querySelector("button");
+                positionDropdown(dd, btn || dd.parentElement);
+            }
         }
 
         function renderModelPickerDropdown(targetId) {
@@ -5018,7 +5035,10 @@
             const dd = document.getElementById(`${role}PickerDropdown`);
             if (dd) {
                 dd.classList.toggle("show");
-                if (dd.classList.contains("show")) renderRolePickerDropdown(role);
+                if (dd.classList.contains("show")) {
+                    renderRolePickerDropdown(role);
+                    positionDropdown(dd, document.getElementById(`${role}PickerBtn`));
+                }
             }
         }
 
