@@ -11,6 +11,8 @@
     <!-- highlight.js 代码高亮 -->
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/github-dark.min.css') }}">
     <script src="{{ url_for('static', filename='vendor/highlight.min.js') }}"></script>
+    <!-- CodeMirror 6：本地构建的单文件包（见 web/static/vendor/README.md）-->
+    <script src="{{ url_for('static', filename='vendor/codemirror.min.js') }}"></script>
     <script>
         // 服务端注入的访问令牌。跨域页面读不到本页面内容，因此不会泄露；
         // 所有同源 fetch 自动带上 X-Auth-Token —— 跨域请求无法设置自定义头，CSRF 由此被切断。
@@ -1894,6 +1896,240 @@
             color: #78350f !important;
             border-color: #f59e0b !important;
         }
+
+        /* ===== 右侧文件面板 ===== */
+        .tree-item.active {
+            background: #eef2ff;
+            font-weight: 600;
+        }
+
+        body.dark .tree-item.active {
+            background: #2b313d;
+        }
+
+        .file-panel {
+            width: 480px;
+            min-width: 280px;
+            max-width: 80vw;
+            background: var(--bg-app);
+            border-left: 1px solid #eef0f3;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            overflow: hidden;
+        }
+
+        /* 全屏：盖住整个窗口（含侧边栏），Esc 退出 */
+        .file-panel.fullscreen {
+            position: fixed;
+            inset: 0;
+            width: 100vw !important;
+            max-width: none;
+            height: 100vh;
+            z-index: 260;
+        }
+
+        .file-resizer {
+            width: 5px;
+            margin-left: -3px;
+            cursor: col-resize;
+            background: transparent;
+            flex-shrink: 0;
+            z-index: 5;
+        }
+
+        .file-resizer:hover,
+        .file-resizer.dragging {
+            background: #a5b4fc;
+        }
+
+        .file-panel-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 9px 12px;
+            border-bottom: 1px solid #eef0f3;
+            flex-shrink: 0;
+        }
+
+        .fp-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: #111827;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .fp-head-actions {
+            display: flex;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+
+        .fp-meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 12px 6px;
+            flex-shrink: 0;
+        }
+
+        .fp-path {
+            flex: 1;
+            min-width: 0;
+            font-size: 10.5px;
+            color: #9ca3af;
+            font-family: ui-monospace, Menlo, Consolas, monospace;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            direction: rtl;      /* 路径太长时优先显示文件名那一端 */
+            text-align: left;
+        }
+
+        .fp-dirty {
+            font-size: 10.5px;
+            color: #b45309;
+            white-space: nowrap;
+        }
+
+        .fp-editor {
+            flex: 1;
+            overflow: hidden;
+            min-height: 0;
+        }
+
+        /* 让 CodeMirror 撑满容器并自己滚动 */
+        .fp-editor .cm-editor {
+            height: 100%;
+            font-size: 12.5px;
+        }
+
+        .fp-editor .cm-scroller {
+            font-family: ui-monospace, Menlo, Consolas, "Courier New", monospace;
+            line-height: 1.55;
+        }
+
+        .fp-editor .cm-editor.cm-focused {
+            outline: none;
+        }
+
+        .fp-notice {
+            padding: 8px 12px;
+            font-size: 12px;
+            line-height: 1.6;
+            border-top: 1px solid #eef0f3;
+            background: #f9fafb;
+            color: #374151;
+            flex-shrink: 0;
+        }
+
+        .fp-notice.warn {
+            background: #fffbeb;
+            color: #92400e;
+        }
+
+        .fp-notice.error {
+            background: #fef2f2;
+            color: #b91c1c;
+        }
+
+        .fp-notice-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 6px;
+        }
+
+        .fp-foot {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border-top: 1px solid #eef0f3;
+            flex-shrink: 0;
+            flex-wrap: wrap;
+        }
+
+        .fp-btn {
+            font-size: 12px;
+            padding: 5px 10px;
+            border-radius: 6px;
+            border: 1px solid #e5e7eb;
+            background: #fff;
+            color: #374151;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .fp-btn:hover:not(:disabled) {
+            background: #f9fafb;
+        }
+
+        .fp-btn:disabled {
+            opacity: .45;
+            cursor: not-allowed;
+        }
+
+        .fp-btn.primary {
+            background: #667eea;
+            border-color: #667eea;
+            color: #fff;
+        }
+
+        .fp-btn.primary:hover:not(:disabled) {
+            background: #5568d3;
+        }
+
+        .fp-btn.danger {
+            background: #ef4444;
+            border-color: #ef4444;
+            color: #fff;
+        }
+
+        .fp-info {
+            margin-left: auto;
+            font-size: 10.5px;
+            color: #9ca3af;
+            white-space: nowrap;
+        }
+
+        /* 暗色主题下把面板内的浅色底也一起换掉 */
+        body.dark .file-panel {
+            border-left-color: #2a2f3a;
+        }
+
+        body.dark .file-panel-head,
+        body.dark .fp-foot,
+        body.dark .fp-notice {
+            border-color: #2a2f3a;
+        }
+
+        body.dark .fp-notice {
+            background: #1b1f27;
+            color: #cbd5e1;
+        }
+
+        body.dark .fp-notice.warn {
+            background: #2c2410;
+            color: #fbbf24;
+        }
+
+        body.dark .fp-notice.error {
+            background: #2c1414;
+            color: #f87171;
+        }
+
+        body.dark .fp-btn {
+            background: #232833;
+            border-color: #333a47;
+            color: #cbd5e1;
+        }
+
+        body.dark .fp-btn:hover:not(:disabled) {
+            background: #2b313d;
+        }
     </style>
 </head>
 
@@ -1909,6 +2145,8 @@
                     <button class="mode-btn active" data-mode="single" onclick="setMode('single')">单 Agent</button>
                     <button class="mode-btn" data-mode="multi" onclick="setMode('multi')">多 Agent</button>
                 </div>
+                <button class="icon-btn" id="filePanelBtn" onclick="toggleFilePanel()"
+                    title="显示/隐藏文件面板 (Ctrl+B)">📄</button>
                 <button class="icon-btn" id="themeBtn" onclick="toggleTheme()" title="切换主题">🌙</button>
                 <div class="dropdown">
                     <button class="icon-btn" onclick="toggleExportMenu(event)" title="导出">📥</button>
@@ -2050,6 +2288,36 @@
                     <button id="stopBtn" onclick="cancelRun()"
                         title="停止当前任务（协作式取消，会在下一个检查点停下）"
                         style="display: none;">⏹ 停止</button>
+                </div>
+            </div>
+
+            <!-- 右侧文件面板：查看 / 编辑工作区里的文件 -->
+            <div class="file-resizer" id="fileResizer" title="拖动调整宽度" style="display: none;"></div>
+            <div class="file-panel" id="filePanel" style="display: none;">
+                <div class="file-panel-head">
+                    <span class="fp-name" id="fpName">未打开文件</span>
+                    <div class="fp-head-actions">
+                        <button class="icon-btn-mini" id="fpFullBtn" onclick="toggleFileFullscreen()"
+                            title="全屏显示（Esc 退出）">⛶</button>
+                        <button class="icon-btn-mini" onclick="closeFilePanel()"
+                            title="关闭（Ctrl+B）">✕</button>
+                    </div>
+                </div>
+                <div class="fp-meta">
+                    <span class="fp-path" id="fpPath" title=""></span>
+                    <span class="fp-dirty" id="fpDirty" style="display: none;">● 未保存</span>
+                </div>
+                <div class="fp-editor" id="fpEditor"></div>
+                <div class="fp-notice" id="fpNotice" style="display: none;"></div>
+                <div class="fp-foot">
+                    <button class="fp-btn primary" id="fpSaveBtn" onclick="saveFile()" disabled>💾 保存</button>
+                    <button class="fp-btn" id="fpUndoBtn" onclick="undoFile()" disabled
+                        title="撤销（Ctrl+Z）">↶ 撤销</button>
+                    <button class="fp-btn" id="fpRedoBtn" onclick="redoFile()" disabled
+                        title="重做（Ctrl+Shift+Z）">↷ 重做</button>
+                    <button class="fp-btn" id="fpAskBtn" onclick="askAgentAboutFile()"
+                        title="把「读取该文件」填进对话输入框，交给 Agent 处理">🤖 让 Agent 处理</button>
+                    <span class="fp-info" id="fpInfo"></span>
                 </div>
             </div>
         </div>
@@ -3211,14 +3479,305 @@
                 nameSpan2.textContent = node.name;
                 item.appendChild(nameSpan2);
                 item.onclick = () => {
-                    // 点击文件 → 填入输入框（或预览）
-                    document.getElementById("task").value = `读取文件 ${node.path} 并总结内容`;
-                    document.getElementById("task").focus();
+                    // 点击文件 → 在右侧面板打开。
+                    // 按用户要求不再往对话输入框塞文本（那样看个文件要烧一整轮 Agent）。
+                    // 想交给 Agent 处理时，面板底部有「🤖 让 Agent 处理」按钮。
+                    document.querySelectorAll("#projectTree .tree-item.active")
+                        .forEach(el => el.classList.remove("active"));
+                    item.classList.add("active");
+                    openFile(node.path);
                 };
                 div.appendChild(item);
             }
             return div;
         }
+
+        // ============ 右侧文件面板（CodeMirror 6）============
+        let cmEditor = null;      // CodeMirror 句柄
+        let fpPath = null;        // 当前文件绝对路径
+        let fpBaseline = "";      // 载入时的内容（判断「有没有改过」）
+        let fpHash = null;        // 载入时的 sha256（保存时做陈旧检测）
+        let fpEol = "lf";
+        let fpReadOnly = false;
+
+        function fpEl(id) { return document.getElementById(id); }
+        function filePanelOpen() { return fpEl("filePanel").style.display !== "none"; }
+
+        function setFilePanelVisible(visible) {
+            fpEl("filePanel").style.display = visible ? "flex" : "none";
+            fpEl("fileResizer").style.display = visible ? "block" : "none";
+            if (visible) {
+                applyFilePanelWidth();
+                if (cmEditor) setTimeout(() => cmEditor.requestMeasure(), 0);
+            }
+            localStorage.setItem("filePanelOpen", visible ? "1" : "0");
+        }
+
+        function toggleFilePanel() {
+            const visible = !filePanelOpen();
+            setFilePanelVisible(visible);
+            if (visible && !fpPath) {
+                showFileNotice("在左侧「项目树」里点一个文件即可查看 / 编辑。");
+            }
+        }
+
+        function closeFilePanel() {
+            if (fpIsDirty() && !confirm("「" + (fpPath || "").split("/").pop() + "」有未保存的改动，确定关闭吗？")) return;
+            if (fpEl("filePanel").classList.contains("fullscreen")) toggleFileFullscreen();
+            setFilePanelVisible(false);
+        }
+
+        function fpIsDirty() {
+            return !!(cmEditor && fpPath && cmEditor.getValue() !== fpBaseline);
+        }
+
+        function ensureEditor() {
+            if (cmEditor) return cmEditor;
+            if (!window.AgentCodeCM) {
+                showFileNotice("CodeMirror 未加载（web/static/vendor/codemirror.min.js 缺失）", null, "error");
+                return null;
+            }
+            cmEditor = window.AgentCodeCM.create(fpEl("fpEditor"), {
+                doc: "",
+                dark: document.body.classList.contains("dark"),
+                onChange: updateFileButtons,
+                onStateChange: updateFileButtons,
+                onSave: () => saveFile(),
+            });
+            return cmEditor;
+        }
+
+        function updateFileButtons() {
+            const dirty = fpIsDirty();
+            const save = fpEl("fpSaveBtn");
+            if (save) {
+                save.disabled = !dirty || fpReadOnly;
+                save.textContent = dirty ? "💾 保存 *" : "💾 保存";
+            }
+            const dirtyTag = fpEl("fpDirty");
+            if (dirtyTag) dirtyTag.style.display = dirty ? "inline" : "none";
+            if (fpEl("fpUndoBtn")) fpEl("fpUndoBtn").disabled = !cmEditor || !cmEditor.canUndo();
+            if (fpEl("fpRedoBtn")) fpEl("fpRedoBtn").disabled = !cmEditor || !cmEditor.canRedo();
+        }
+
+        function updateFileMeta(data) {
+            // 小文件按字节显示，否则一律 "0.0 KB" 看着像空文件
+            const size = data.size < 1024
+                ? `${data.size} B`
+                : `${(data.size / 1024).toFixed(1)} KB`;
+            const enc = data.editable ? (data.encoding || "utf-8").toUpperCase() : "只读";
+            fpEl("fpInfo").textContent = `${enc} · ${String(data.eol || "lf").toUpperCase()} · ${size}`;
+        }
+
+        /** 面板底部提示条。actions 形如 [{label, act, danger}] */
+        function showFileNotice(text, actions, kind) {
+            const box = fpEl("fpNotice");
+            box.className = "fp-notice" + (kind ? " " + kind : "");
+            box.innerHTML = `<div>${escapeHtml(text)}</div>`;
+            if (actions && actions.length) {
+                const row = document.createElement("div");
+                row.className = "fp-notice-actions";
+                actions.forEach(a => {
+                    const b = document.createElement("button");
+                    b.className = "fp-btn" + (a.danger ? " danger" : "");
+                    b.textContent = a.label;
+                    b.onclick = a.act;
+                    row.appendChild(b);
+                });
+                box.appendChild(row);
+            }
+            box.style.display = "block";
+        }
+
+        function clearFileNotice() { fpEl("fpNotice").style.display = "none"; }
+
+        async function openFile(path) {
+            setFilePanelVisible(true);
+
+            if (fpIsDirty() && path !== fpPath
+                && !confirm("当前文件有未保存的改动，确定切换到另一个文件吗？")) return;
+
+            const name = String(path).split("/").pop();
+            fpEl("fpName").textContent = name;
+            fpEl("fpPath").textContent = path;
+            fpEl("fpPath").title = path;
+
+            let data;
+            try {
+                const res = await fetch(`/api/file_content?path=${encodeURIComponent(path)}`);
+                data = await res.json();
+            } catch (e) {
+                showFileNotice("打开失败：" + e.message, null, "error");
+                return;
+            }
+            if (!data.ok) {
+                showFileNotice(data.error || "打开失败", null, "error");
+                return;
+            }
+
+            if (!ensureEditor()) return;
+
+            fpPath = data.path;
+            fpHash = data.hash;
+            fpEol = data.eol || "lf";
+            fpReadOnly = !data.editable;
+
+            cmEditor.setLanguage(window.AgentCodeCM.detectLang(data.path));
+            cmEditor.setTheme(document.body.classList.contains("dark"));
+            cmEditor.setReadOnly(fpReadOnly);
+            // setValue 不记进撤销历史，所以再清一次栈，避免跨文件撤销
+            cmEditor.setValue(data.editable ? data.content : "");
+            cmEditor.resetHistory();
+            fpBaseline = cmEditor.getValue();
+
+            updateFileMeta(data);
+            updateFileButtons();
+            localStorage.setItem("filePanelPath", data.path);
+
+            if (data.editable) {
+                clearFileNotice();
+                cmEditor.focus();
+            } else {
+                showFileNotice("⛔ " + (data.message || "该文件不可编辑"), null, "warn");
+            }
+        }
+
+        async function saveFile(force) {
+            if (!fpPath || !cmEditor) return;
+            if (fpReadOnly) { showFileNotice("该文件为只读，无法保存。", null, "warn"); return; }
+            if (!fpIsDirty()) { clearFileNotice(); return; }
+
+            const body = { path: fpPath, content: cmEditor.getValue(), eol: fpEol };
+            if (!force) body.expected_hash = fpHash;
+
+            let res, data;
+            try {
+                res = await fetch("/api/file_content", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body),
+                });
+                data = await res.json();
+            } catch (e) {
+                showFileNotice("保存失败：" + e.message, null, "error");
+                return;
+            }
+
+            if (res.status === 409 && data.error === "stale") {
+                // 磁盘上的内容被别人（多半是 Agent）改过了 —— 绝不静默覆盖
+                showFileNotice(
+                    "⚠️ 文件在磁盘上已被改动（可能是 Agent 刚写过）。请选择怎么处理：",
+                    [
+                        { label: "重新加载磁盘内容", act: () => openFile(fpPath) },
+                        { label: "强制覆盖（用我的版本）", act: () => saveFile(true), danger: true },
+                    ],
+                    "warn"
+                );
+                return;
+            }
+            if (!data.ok) {
+                showFileNotice(data.error || "保存失败", null, "error");
+                return;
+            }
+
+            fpHash = data.hash;
+            fpBaseline = cmEditor.getValue();
+            updateFileButtons();
+            showFileNotice(
+                data.backup ? `✅ 已保存（改动前的版本已进回收站：${data.backup}）` : "✅ 已保存",
+                [{ label: "知道了", act: clearFileNotice }]
+            );
+            loadTrashSummary();
+        }
+
+        function undoFile() { if (cmEditor) { cmEditor.focus(); cmEditor.undo(); updateFileButtons(); } }
+        function redoFile() { if (cmEditor) { cmEditor.focus(); cmEditor.redo(); updateFileButtons(); } }
+
+        function toggleFileFullscreen() {
+            const panel = fpEl("filePanel");
+            const on = panel.classList.toggle("fullscreen");
+            const btn = fpEl("fpFullBtn");
+            if (btn) {
+                btn.textContent = on ? "⤡" : "⛶";
+                btn.title = on ? "退出全屏（Esc）" : "全屏显示（Esc 退出）";
+            }
+            if (cmEditor) setTimeout(() => cmEditor.requestMeasure(), 0);
+        }
+
+        /** 保留原来「点文件让 Agent 读」的能力，但改成显式按钮触发。 */
+        function askAgentAboutFile() {
+            if (!fpPath) { showFileNotice("还没有打开文件。", null, "warn"); return; }
+            const input = document.getElementById("task");
+            input.value = `读取文件 ${fpPath} 并总结内容`;
+            input.focus();
+            showFileNotice("已填入对话输入框，按「执行」交给 Agent。");
+        }
+
+        // ---- 面板宽度：拖动调整 + 记忆 ----
+        function applyFilePanelWidth() {
+            const saved = parseInt(localStorage.getItem("filePanelWidth") || "", 10);
+            if (saved >= 280) fpEl("filePanel").style.width = saved + "px";
+        }
+
+        (function bindFileResizer() {
+            const bar = fpEl("fileResizer");
+            const panel = fpEl("filePanel");
+            if (!bar || !panel) return;
+            let dragging = false, startX = 0, startW = 0;
+            bar.addEventListener("mousedown", (e) => {
+                dragging = true;
+                startX = e.clientX;
+                startW = panel.getBoundingClientRect().width;
+                bar.classList.add("dragging");
+                document.body.style.cursor = "col-resize";
+                document.body.style.userSelect = "none";
+                e.preventDefault();
+            });
+            document.addEventListener("mousemove", (e) => {
+                if (!dragging) return;
+                const w = Math.min(Math.max(startW - (e.clientX - startX), 280), window.innerWidth * 0.8);
+                panel.style.width = w + "px";
+            });
+            document.addEventListener("mouseup", () => {
+                if (!dragging) return;
+                dragging = false;
+                bar.classList.remove("dragging");
+                document.body.style.cursor = "";
+                document.body.style.userSelect = "";
+                localStorage.setItem("filePanelWidth", String(panel.getBoundingClientRect().width | 0));
+                if (cmEditor) cmEditor.requestMeasure();
+            });
+        })();
+
+        // ---- 快捷键（capture 阶段，确保 CodeMirror 聚焦时也生效）----
+        document.addEventListener("keydown", (e) => {
+            const mod = e.ctrlKey || e.metaKey;
+            if (mod && !e.altKey) {
+                const k = e.key.toLowerCase();
+                if (k === "b") {                       // 显示 / 隐藏文件面板
+                    e.preventDefault(); e.stopPropagation(); toggleFilePanel(); return;
+                }
+                if (k === "s") {                       // 保存（阻止浏览器「保存网页」）
+                    if (filePanelOpen()) { e.preventDefault(); e.stopPropagation(); saveFile(); }
+                    return;
+                }
+            }
+            if (e.key === "Escape") {
+                const panel = fpEl("filePanel");
+                if (panel && panel.classList.contains("fullscreen")) {
+                    e.preventDefault(); toggleFileFullscreen();
+                }
+            }
+        }, true);
+
+        // 启动时恢复上次的面板状态与打开的文件
+        (function restoreFilePanel() {
+            if (localStorage.getItem("filePanelOpen") === "1") {
+                setFilePanelVisible(true);
+                const last = localStorage.getItem("filePanelPath");
+                if (last) openFile(last);
+            }
+        })();
 
         // ============ 图片上传 / 粘贴（多模态）============
         const MAX_IMAGE_BYTES = 10 * 1024 * 1024;   // 单张上限 10MB
@@ -4109,6 +4668,8 @@
             const btn = document.getElementById("themeBtn");
             if (btn) btn.textContent = isDark ? "☀️" : "🌙";
             localStorage.setItem("theme", isDark ? "dark" : "light");
+            // 右侧文件面板里的 CodeMirror 也要跟着换主题
+            if (cmEditor) cmEditor.setTheme(isDark);
         }
         function toggleTheme() {
             const isDark = !document.body.classList.contains("dark");

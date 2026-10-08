@@ -217,34 +217,193 @@ def project_tree():
     return jsonify({"ok": True, "tree": tree})
 
 
+# ============ 文件读写（右侧文件面板）============
+# 编辑上限。超过就完全不返回内容，而不是截断——**截断的内容一旦被保存，
+# 文件尾部就被删掉了**，所以宁可不让编辑。
+MAX_EDIT_BYTES = 1_000_000
+
+
+def _sha256_file(path: str) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _read_for_editor(path: str) -> tuple[dict, int]:
+    """读取文件供编辑器使用。返回 (payload, http_status)。
+
+    三条底线：
+    1. **非 UTF-8 一律不给编辑**。以前这里是 ``errors="ignore"``，会静默丢掉
+       解不开的字节；「读出来→改→存回去」会把 GBK 等文件永久写坏。
+    2. **二进制不给编辑**（首 8KB 出现 NUL 字节即判定）。
+    3. **超限不给编辑**，绝不返回截断内容。
+    """
+    size = os.path.getsize(path)
+    mtime = os.path.getmtime(path)
+    base = {
+        "ok": True,
+        "path": path,
+        "size": size,
+        "mtime": mtime,
+        "hash": _sha256_file(path),
+    }
+
+    if size > MAX_EDIT_BYTES:
+        base.update(
+            editable=False,
+            reason="too-large",
+            message=f"文件 {size / 1024:.0f} KB，超过 {MAX_EDIT_BYTES // 1000} KB 的编辑上限，未加载内容",
+        )
+        return base, 200
+
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+    except Exception as e:
+        return {"ok": False, "error": f"读取失败：{e}"}, 500
+
+    if b"\x00" in raw[:8192]:
+        base.update(editable=False, reason="binary", message="二进制文件，无法以文本方式编辑")
+        return base, 200
+
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as e:
+        base.update(
+            editable=False,
+            reason="not-utf8",
+            message=f"不是 UTF-8 编码（第 {e.start} 字节处解码失败），为避免写坏文件已禁止编辑",
+        )
+        return base, 200
+
+    # 换行符统一成 LF 交给编辑器，保存时再还原，保证「没改就不动文件」
+    eol = "crlf" if "\r\n" in text else "lf"
+    if eol == "crlf":
+        text = text.replace("\r\n", "\n")
+
+    base.update(editable=True, content=text, eol=eol, encoding="utf-8")
+    return base, 200
+
+
+def _atomic_write_text(path: str, text: str) -> None:
+    """原子写：先写同目录临时文件再 os.replace，避免写一半崩溃留下半个文件。"""
+    import tempfile
+
+    directory = os.path.dirname(path) or "."
+    mode = os.stat(path).st_mode
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".agentcode-tmp-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+        os.chmod(tmp, mode)  # 保住原文件权限
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 @app.route("/api/file_content", methods=["GET"])
 def file_content():
-    """返回文件内容（用于预览）。
-    参数：path
-    """
+    """读取文件供右侧面板查看/编辑。参数：path"""
     import os
+
     path = request.args.get("path", "")
     if not path:
-        return jsonify({"error": "缺少 path 参数"}), 400
+        return jsonify({"ok": False, "error": "缺少 path 参数"}), 400
 
     # 先做权限校验，再判存在性：避免用「文件是否存在」探测白名单外的路径
     if not is_path_permitted(path):
-        return jsonify({"error": f"拒绝访问：{path} 不在允许范围内"}), 403
+        return jsonify({"ok": False, "error": f"拒绝访问：{path} 不在允许范围内"}), 403
 
     if not os.path.isfile(path):
-        return jsonify({"error": f"不是文件：{path}"}), 400
+        return jsonify({"ok": False, "error": f"不是文件：{path}"}), 400
 
-    # 限制大小
-    size = os.path.getsize(path)
-    if size > 100_000:
-        return jsonify({"error": f"文件太大（{size} 字节），无法预览"}), 400
+    payload, status = _read_for_editor(path)
+    return jsonify(payload), status
+
+
+@app.route("/api/file_content", methods=["PUT"])
+def save_file_content():
+    """保存右侧面板里的编辑。请求：{path, content, expected_hash?}
+
+    写之前会：
+    1. 权限校验（复用 Web 白名单，敏感目录一律拒绝）
+    2. **陈旧检测**：磁盘上的 hash 与 expected_hash 不符就返回 409。
+       本项目的核心用途就是让 Agent 改你的文件，「你看编辑器时 Agent 正好写了
+       同一个文件」是常态；没有这个检查，一次保存就会静默覆盖掉 Agent 的成果。
+    3. **先备份进回收站**（可一键恢复）
+    4. 原子写，并还原原来的换行符风格
+    """
+    import os
+
+    import trash
+
+    data = request.get_json(silent=True) or {}
+    path = (data.get("path") or "").strip()
+    content = data.get("content")
+    expected_hash = (data.get("expected_hash") or "").strip() or None
+    eol = (data.get("eol") or "lf").lower()
+
+    if not path:
+        return jsonify({"ok": False, "error": "缺少 path 参数"}), 400
+    if content is None:
+        return jsonify({"ok": False, "error": "缺少 content"}), 400
+
+    if not is_path_permitted(path):
+        return jsonify({"ok": False, "error": f"拒绝写入：{path} 不在允许范围内"}), 403
+    if not os.path.isfile(path):
+        return jsonify({"ok": False, "error": f"文件不存在：{path}"}), 400
+
+    encoded = content.encode("utf-8")
+    if len(encoded) > MAX_EDIT_BYTES:
+        return jsonify(
+            {"ok": False, "error": f"内容 {len(encoded) / 1024:.0f} KB，超过编辑上限"}
+        ), 400
+
+    if expected_hash:
+        current = _sha256_file(path)
+        if current != expected_hash:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "stale",
+                    "current_hash": current,
+                    "message": "文件在磁盘上已被改动（可能是 Agent 刚写过），已拒绝覆盖。"
+                    "请先「重新加载」确认最新内容，或选择强制覆盖。",
+                }
+            ), 409
 
     try:
-        with open(path, encoding="utf-8", errors="ignore") as f:
-            content = f.read()
-        return jsonify({"ok": True, "content": content, "size": size})
+        backup = trash.backup_file(path, kind="backup")
+    except Exception:
+        backup = None
+
+    try:
+        text = content.replace("\r\n", "\n")
+        if eol == "crlf":
+            text = text.replace("\n", "\r\n")
+        _atomic_write_text(path, text)
     except Exception as e:
-        return jsonify({"error": f"读取失败：{e}"}), 500
+        return jsonify({"ok": False, "error": f"写入失败：{e}"}), 500
+
+    stat = os.stat(path)
+    return jsonify(
+        {
+            "ok": True,
+            "path": path,
+            "size": stat.st_size,
+            "mtime": stat.st_mtime,
+            "hash": _sha256_file(path),
+            "backup": os.path.basename(backup) if backup else None,
+        }
+    )
 
 
 # ============ 页面 ============
