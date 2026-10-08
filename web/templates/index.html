@@ -1053,6 +1053,280 @@
             font-size: 13px;
         }
 
+        /* ===== 工作区选择器 ===== */
+        .ws-selector {
+            position: relative;
+            padding: 10px 10px 6px;
+            flex-shrink: 0;
+        }
+
+        .ws-current {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            cursor: pointer;
+            text-align: left;
+        }
+
+        .ws-current:hover {
+            border-color: #c7d2fe;
+            background: #f8faff;
+        }
+
+        .ws-badge {
+            font-size: 15px;
+            flex-shrink: 0;
+        }
+
+        .ws-text {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .ws-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: #111827;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .ws-path {
+            font-size: 10px;
+            color: #9ca3af;
+            font-family: ui-monospace, Menlo, Consolas, monospace;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .ws-caret {
+            font-size: 11px;
+            color: #9ca3af;
+            flex-shrink: 0;
+        }
+
+        .ws-menu {
+            position: absolute;
+            left: 10px;
+            /* 菜单要比侧边栏宽，否则工作区路径会被截成 /home/pz/Py… 没法分辨 */
+            width: 320px;
+            top: calc(100% - 4px);
+            z-index: 60;
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            box-shadow: 0 12px 32px rgba(0, 0, 0, .16);
+            padding: 6px;
+            max-height: 46vh;
+            overflow: auto;
+        }
+
+        .ws-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 8px;
+            border-radius: 7px;
+            cursor: pointer;
+        }
+
+        .ws-item:hover {
+            background: #f3f4f6;
+        }
+
+        .ws-item.active {
+            background: #eef2ff;
+        }
+
+        .ws-item-main {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .ws-item-name {
+            font-size: 12.5px;
+            color: #111827;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .ws-item-path {
+            font-size: 10px;
+            color: #9ca3af;
+            font-family: ui-monospace, Menlo, Consolas, monospace;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .ws-item-count {
+            font-size: 10px;
+            color: #6b7280;
+            background: #f3f4f6;
+            border-radius: 999px;
+            padding: 1px 6px;
+            flex-shrink: 0;
+        }
+
+        .ws-item-actions {
+            display: flex;
+            gap: 2px;
+            flex-shrink: 0;
+        }
+
+        .ws-item-actions button {
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 12px;
+            padding: 3px 4px;
+            border-radius: 5px;
+            opacity: .55;
+        }
+
+        .ws-item-actions button:hover {
+            opacity: 1;
+            background: #e5e7eb;
+        }
+
+        .ws-bad {
+            color: #b91c1c;
+        }
+
+        .ws-menu-sep {
+            height: 1px;
+            background: #eef0f3;
+            margin: 5px 2px;
+        }
+
+        .ws-menu-new {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            padding: 8px;
+            border-radius: 7px;
+            cursor: pointer;
+            font-size: 12.5px;
+            color: #4f46e5;
+            font-weight: 600;
+        }
+
+        .ws-menu-new:hover {
+            background: #eef2ff;
+        }
+
+        /* ===== 通用弹窗 ===== */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, .45);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 300;
+        }
+
+        .modal-box {
+            width: min(520px, 92vw);
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, .28);
+            overflow: hidden;
+        }
+
+        .modal-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 13px 18px;
+            border-bottom: 1px solid #eef0f3;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .modal-body {
+            padding: 16px 18px 6px;
+        }
+
+        .fld {
+            display: block;
+            margin-bottom: 14px;
+        }
+
+        .fld-label {
+            display: block;
+            font-size: 12px;
+            color: #374151;
+            margin-bottom: 5px;
+        }
+
+        .fld input[type="text"] {
+            width: 100%;
+            padding: 7px 10px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            font-size: 13px;
+            box-sizing: border-box;
+        }
+
+        .fld input[type="text"]:focus {
+            outline: none;
+            border-color: #a5b4fc;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, .12);
+        }
+
+        .fld-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .fld-row input {
+            flex: 1;
+            font-family: ui-monospace, Menlo, Consolas, monospace;
+            font-size: 12px;
+        }
+
+        .fld-hint {
+            font-size: 11.5px;
+            color: #6b7280;
+            line-height: 1.7;
+            margin: 0 0 10px;
+        }
+
+        .fld-hint code {
+            background: #f3f4f6;
+            padding: 1px 5px;
+            border-radius: 4px;
+            font-size: 11px;
+        }
+
+        .fld-error {
+            font-size: 12px;
+            color: #b91c1c;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 6px;
+            padding: 7px 10px;
+            margin: 0 0 10px;
+        }
+
+        .modal-foot {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            padding: 12px 18px 16px;
+        }
+
         .trash-toolbar {
             display: flex;
             align-items: center;
@@ -1649,7 +1923,21 @@
 
         <div class="main-body">
             <div class="sidebar">
-                <button class="new-chat-btn" onclick="createNewSession()">+ 新对话</button>
+                <!-- 工作区选择器：会话都挂在某个工作区之下，工作区决定工作目录 -->
+                <div class="ws-selector">
+                    <button class="ws-current" id="wsCurrentBtn" onclick="toggleWsMenu(event)"
+                        title="切换 / 新建工作区">
+                        <span class="ws-badge">📁</span>
+                        <span class="ws-text">
+                            <span class="ws-name" id="wsCurrentName">加载中…</span>
+                            <span class="ws-path" id="wsCurrentPath"></span>
+                        </span>
+                        <span class="ws-caret">▾</span>
+                    </button>
+                    <div class="ws-menu" id="wsMenu" style="display: none;"></div>
+                </div>
+
+                <button class="new-chat-btn" onclick="createNewSession()" id="newChatBtn">+ 新对话</button>
                 <div class="session-list" id="sessionList"></div>
 
                 <!-- 文档区 -->
@@ -1713,15 +2001,18 @@
                 </div>
                 <div
                     style="padding: 6px 16px; background: #f9fafb; border-top: 1px solid #eef0f3; display: flex; align-items: center; gap: 8px; font-size: 12px;">
-                    <span style="color: #6b7280; white-space: nowrap;">📁 当前项目：</span>
-                    <input type="text" id="projectRootInput" placeholder="/home/pz/PycharmProjects/your-project"
-                        style="flex: 1; padding: 4px 8px; border: 1px solid #e5e7eb; border-radius: 4px; font-size: 12px; font-family: monospace;"
-                        autocomplete="off">
-                    <button onclick="selectProjectFolder()"
-                        style="padding: 4px 10px; background: #10b981; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer;">📂
-                        选择</button>
-                    <button onclick="saveProjectRoot()"
-                        style="padding: 4px 10px; background: #667eea; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer;">应用</button>
+                    <span style="color: #6b7280; white-space: nowrap;">📁 工作区：</span>
+                    <!-- 原来是可编辑输入框 + 应用按钮，但路径同时存在前端 localStorage
+                         与后端按会话状态里，切会话时会互相覆盖。现在只读展示，
+                         路径统一由「会话所属工作区」决定，点右侧按钮切换工作区。 -->
+                    <span id="projectRootDisplay"
+                        style="flex: 1; padding: 4px 8px; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 4px; font-size: 12px; font-family: monospace; color: #374151; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
+                        title="">（未选择工作区）</span>
+                    <button onclick="openWsModal()"
+                        style="padding: 4px 10px; background: #10b981; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer;">＋
+                        新建工作区</button>
+                    <button onclick="toggleWsMenu(event)"
+                        style="padding: 4px 10px; background: #667eea; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer;">切换</button>
                 </div>
                 <div class="input-area">
                     <div class="image-preview" id="imagePreview"></div>
@@ -1772,6 +2063,41 @@
                         title="停止当前任务（协作式取消，会在下一个检查点停下）"
                         style="display: none;">⏹ 停止</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 工作区新建 / 编辑弹窗 -->
+    <div class="modal-overlay" id="wsModal" style="display: none;"
+        onclick="if(event.target===this) closeWsModal()">
+        <div class="modal-box">
+            <div class="modal-head">
+                <span id="wsModalTitle">新建工作区</span>
+                <button class="icon-btn" onclick="closeWsModal()" title="关闭">✕</button>
+            </div>
+            <div class="modal-body">
+                <label class="fld">
+                    <span class="fld-label">工作区名称</span>
+                    <input type="text" id="wsNameInput" placeholder="例如 agent-code" autocomplete="off">
+                </label>
+                <label class="fld">
+                    <span class="fld-label">工作区位置</span>
+                    <div class="fld-row">
+                        <input type="text" id="wsPathInput" placeholder="/home/pz/PycharmProjects"
+                            autocomplete="off">
+                        <button class="trash-btn" onclick="pickWorkspaceFolder()">📂 选择文件夹</button>
+                    </div>
+                </label>
+                <p class="fld-hint">
+                    不填位置则使用默认工作位置：
+                    <code id="wsDefaultPath">/home/pz/PycharmProjects</code><br>
+                    该工作区下的会话，都会以这个目录作为工作目录。
+                </p>
+                <p class="fld-error" id="wsModalError" style="display: none;"></p>
+            </div>
+            <div class="modal-foot">
+                <button class="trash-btn" onclick="closeWsModal()">取消</button>
+                <button class="trash-btn restore" id="wsSubmitBtn" onclick="submitWorkspace()">创建</button>
             </div>
         </div>
     </div>
@@ -1952,7 +2278,8 @@
                     // 用 Executor 的 provider / model，保持与中断时一致
                     provider_id: (multiAgentMode ? (roleSelection.executor.providerId || currentProviderId) : currentProviderId) || null,
                     model: (multiAgentMode ? (roleSelection.executor.model || currentModelName) : currentModelName) || null,
-                    project_root: localStorage.getItem("projectRoot") || null,
+                    // 不再传 project_root：工作目录以「会话所属工作区」为准，
+                    // 由后端解析，避免前端全局 localStorage 覆盖其它会话的设置
                 };
                 if (multiAgentMode) {
                     // 续跑时三角色的 provider / model 都要与中断前一致
@@ -2260,15 +2587,248 @@
             }
         }
         // ============ 会话管理 ============
+        // ===== 工作区 =====
+        // 工作区 = 一组会话 + 一个工作目录。会话挂在某个工作区下，
+        // 该工作区的位置就是这些会话的工作目录（不再用前端 localStorage 存路径）。
+        let workspaces = [];
+        let currentWorkspaceId = null;
+        let wsDefaultPath = "/home/pz/PycharmProjects";
+        let wsEditingId = null;   // 弹窗处于编辑态时的工作区 id；null 表示新建
+
+        async function loadWorkspaces() {
+            try {
+                const res = await fetch("/workspaces");
+                const j = await res.json();
+                workspaces = j.workspaces || [];
+                wsDefaultPath = j.default_path || wsDefaultPath;
+                const dp = document.getElementById("wsDefaultPath");
+                if (dp) dp.textContent = wsDefaultPath;
+
+                const saved = Number(localStorage.getItem("currentWorkspaceId")) || null;
+                currentWorkspaceId = workspaces.some(w => w.id === saved)
+                    ? saved
+                    : (workspaces[0] ? workspaces[0].id : null);
+
+                renderWorkspaceSelector();
+                renderWorkspaceMenu();
+            } catch (e) {
+                console.error("加载工作区失败", e);
+            }
+        }
+
+        function currentWorkspace() {
+            return workspaces.find(w => w.id === currentWorkspaceId) || null;
+        }
+
+        function renderWorkspaceSelector() {
+            const ws = currentWorkspace();
+            const nameEl = document.getElementById("wsCurrentName");
+            const pathEl = document.getElementById("wsCurrentPath");
+            const dispEl = document.getElementById("projectRootDisplay");
+            const newBtn = document.getElementById("newChatBtn");
+            if (!ws) {
+                nameEl.textContent = "（无工作区）";
+                pathEl.textContent = "";
+                if (dispEl) dispEl.textContent = "（未选择工作区）";
+                if (newBtn) newBtn.textContent = "+ 新对话";
+                return;
+            }
+            nameEl.textContent = ws.name;
+            pathEl.textContent = ws.exists ? ws.path : ws.path + "  ⚠️ 不存在";
+            if (dispEl) {
+                dispEl.textContent = ws.path + (ws.exists ? "" : "   ⚠️ 目录不存在");
+                dispEl.title = ws.path;
+            }
+            if (newBtn) newBtn.textContent = `+ 在「${ws.name}」新建会话`;
+        }
+
+        function renderWorkspaceMenu() {
+            const menu = document.getElementById("wsMenu");
+            const rows = workspaces.map(w => `
+                <div class="ws-item ${w.id === currentWorkspaceId ? "active" : ""}" data-ws="${w.id}">
+                    <span class="ws-badge">${w.id === currentWorkspaceId ? "📂" : "📁"}</span>
+                    <div class="ws-item-main">
+                        <div class="ws-item-name">${escapeHtml(w.name)}</div>
+                        <div class="ws-item-path ${w.exists ? "" : "ws-bad"}"
+                             title="${escapeHtml(w.path)}">${escapeHtml(w.path)}${w.exists ? "" : "（不存在）"}</div>
+                    </div>
+                    <span class="ws-item-count">${w.session_count}</span>
+                    <div class="ws-item-actions">
+                        <button data-act="edit" data-id="${w.id}" title="编辑">✎</button>
+                        ${workspaces.length > 1
+                            ? `<button data-act="del" data-id="${w.id}" title="删除">🗑</button>` : ""}
+                    </div>
+                </div>`).join("");
+            menu.innerHTML = rows + `
+                <div class="ws-menu-sep"></div>
+                <div class="ws-menu-new" data-act="new">＋ 新建工作区…</div>`;
+        }
+
+        function toggleWsMenu(ev) {
+            if (ev) ev.stopPropagation();
+            const menu = document.getElementById("wsMenu");
+            const open = menu.style.display !== "none";
+            if (open) {
+                menu.style.display = "none";
+            } else {
+                renderWorkspaceMenu();
+                menu.style.display = "block";
+            }
+        }
+
+        function closeWsMenu() {
+            const menu = document.getElementById("wsMenu");
+            if (menu) menu.style.display = "none";
+        }
+
+        async function selectWorkspace(id) {
+            if (id === currentWorkspaceId) { closeWsMenu(); return; }
+            currentWorkspaceId = id;
+            localStorage.setItem("currentWorkspaceId", String(id));
+            closeWsMenu();
+            renderWorkspaceSelector();
+            // 会话是按工作区过滤的：换工作区就要重新载入列表（没有会话会自动建一个）
+            currentSessionId = null;
+            await loadSessions();
+            await loadProjectTree();
+        }
+
+        // ---- 新建 / 编辑工作区弹窗 ----
+        function openWsModal(id) {
+            wsEditingId = id || null;
+            const ws = id ? workspaces.find(w => w.id === id) : null;
+            document.getElementById("wsModalTitle").textContent = ws ? "编辑工作区" : "新建工作区";
+            document.getElementById("wsSubmitBtn").textContent = ws ? "保存" : "创建";
+            document.getElementById("wsNameInput").value = ws ? ws.name : "";
+            document.getElementById("wsPathInput").value = ws ? ws.path : "";
+            document.getElementById("wsModalError").style.display = "none";
+            document.getElementById("wsModal").style.display = "flex";
+            setTimeout(() => document.getElementById("wsNameInput").focus(), 30);
+        }
+
+        function closeWsModal() {
+            document.getElementById("wsModal").style.display = "none";
+            wsEditingId = null;
+        }
+
+        async function pickWorkspaceFolder() {
+            try {
+                const res = await fetch("/api/select_folder", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({}),
+                });
+                const data = await res.json();
+                if (data.ok && data.path) {
+                    document.getElementById("wsPathInput").value = data.path;
+                    // 名称留空时，顺手用目录名填上，省得再手打
+                    const nameEl = document.getElementById("wsNameInput");
+                    if (!nameEl.value.trim()) {
+                        const parts = data.path.replace(/\/+$/, "").split("/");
+                        nameEl.value = parts[parts.length - 1] || "";
+                    }
+                } else if (data.error) {
+                    showWsError(data.error);
+                }
+            } catch (e) {
+                showWsError("弹窗失败：" + e.message);
+            }
+        }
+
+        function showWsError(msg) {
+            const el = document.getElementById("wsModalError");
+            el.textContent = msg;
+            el.style.display = "block";
+        }
+
+        async function submitWorkspace() {
+            const name = document.getElementById("wsNameInput").value.trim();
+            const path = document.getElementById("wsPathInput").value.trim();
+            const btn = document.getElementById("wsSubmitBtn");
+            btn.disabled = true;
+            try {
+                const url = wsEditingId ? `/workspaces/${wsEditingId}` : "/workspaces";
+                const res = await fetch(url, {
+                    method: wsEditingId ? "PATCH" : "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name, path }),
+                });
+                const j = await res.json();
+                if (!j.ok) { showWsError(j.error || "保存失败"); return; }
+                const newId = j.id || wsEditingId;
+                closeWsModal();
+                await loadWorkspaces();
+                if (!wsEditingId && newId) {
+                    // 新建后直接切过去，符合「建完就想在这儿干活」的直觉
+                    currentWorkspaceId = newId;
+                    localStorage.setItem("currentWorkspaceId", String(newId));
+                    renderWorkspaceSelector();
+                    currentSessionId = null;
+                    await loadSessions();
+                }
+            } catch (e) {
+                showWsError("保存失败：" + e.message);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function deleteWorkspace(id, ev) {
+            if (ev) ev.stopPropagation();
+            const ws = workspaces.find(w => w.id === id);
+            if (!ws) return;
+            const extra = ws.session_count
+                ? `\n注意：该工作区下的 ${ws.session_count} 个会话及其聊天记录会一并删除。`
+                : "";
+            if (!confirm(`删除工作区「${ws.name}」？${extra}\n（只会删记录，不会动磁盘上的目录）`)) return;
+            const res = await fetch(`/workspaces/${id}`, { method: "DELETE" });
+            const j = await res.json();
+            if (!j.ok) { alert(j.error || "删除失败"); return; }
+            if (id === currentWorkspaceId) {
+                currentSessionId = null;
+                localStorage.removeItem("currentWorkspaceId");
+            }
+            await loadWorkspaces();
+            await loadSessions();
+        }
+
+        (function bindWsMenu() {
+            const menu = document.getElementById("wsMenu");
+            if (!menu) return;
+            menu.addEventListener("click", (ev) => {
+                const act = ev.target.closest("[data-act]");
+                if (!act) return;
+                ev.stopPropagation();
+                const a = act.dataset.act;
+                if (a === "new") { closeWsMenu(); openWsModal(); return; }
+                const id = Number(act.dataset.id);
+                if (a === "edit") { closeWsMenu(); openWsModal(id); return; }
+                if (a === "del") { deleteWorkspace(id, ev); return; }
+                selectWorkspace(id);
+            });
+            // 点空白处收起菜单
+            document.addEventListener("click", (ev) => {
+                if (!ev.target.closest(".ws-selector")) closeWsMenu();
+            });
+            document.addEventListener("keydown", (ev) => {
+                if (ev.key !== "Escape") return;
+                closeWsMenu();
+                closeWsModal();
+            });
+        })();
+
         async function loadSessions() {
             try {
-                const res = await fetch("/sessions");
+                const q = currentWorkspaceId ? `?workspace_id=${currentWorkspaceId}` : "";
+                const res = await fetch("/sessions" + q);
                 const sessions = await res.json();
                 renderSessionList(sessions);
 
-                if (!currentSessionId) {
+                // 当前会话不属于这个工作区时，切到本工作区的第一个
+                const belongs = sessions.some(s => s.id === currentSessionId);
+                if (!belongs) {
                     if (sessions.length > 0) {
-                        switchSession(sessions[0].id);
+                        await switchSession(sessions[0].id);
                     } else {
                         await createNewSession();
                     }
@@ -2529,49 +3089,31 @@
 
         async function createNewSession() {
             try {
-                const res = await fetch("/sessions", { method: "POST" });
+                // 新会话建在「当前所选工作区」之下；没选就交给后端落到默认工作区
+                const res = await fetch("/sessions", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ workspace_id: currentWorkspaceId }),
+                });
                 const data = await res.json();
+                if (data.workspace_id && data.workspace_id !== currentWorkspaceId) {
+                    currentWorkspaceId = data.workspace_id;
+                    localStorage.setItem("currentWorkspaceId", String(data.workspace_id));
+                    renderWorkspaceSelector();
+                }
                 currentSessionId = data.id;
                 await loadSessions();
                 switchSession(data.id);
+                // 会话数变了，顺手刷新工作区列表里的计数
+                loadWorkspaces();
             } catch (e) {
                 console.error("新建会话失败", e);
             }
         }
 
 
-        function saveProjectRoot() {
-            const root = document.getElementById("projectRootInput").value.trim();
-            localStorage.setItem("projectRoot", root);
-            alert("✅ 项目路径已保存：" + (root || "（已清空）"));
-            loadProjectTree();  // 刷新树
-        }
-
-        async function selectProjectFolder() {
-            try {
-                const res = await fetch("/api/select_folder", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({}),
-                });
-                const data = await res.json();
-                if (data.ok && data.path) {
-                    document.getElementById("projectRootInput").value = data.path;
-                    // 自动保存
-                    localStorage.setItem("projectRoot", data.path);
-                    alert("✅ 已选择项目：" + data.path);
-                } else if (data.error) {
-                    alert("❌ " + data.error);
-                }
-            } catch (e) {
-                alert("❌ 弹窗失败：" + e.message);
-            }
-        }
-
-        function loadProjectRoot() {
-            const root = localStorage.getItem("projectRoot") || "";
-            document.getElementById("projectRootInput").value = root;
-        }
+        // 旧的「手动输入项目路径 + 应用」已移除：路径由工作区决定（单一真相源）。
+        // 下方 loadProjectTree 直接取当前工作区的路径。
 
         // ============ 项目树 ============
         let _treeData = null;
@@ -2597,9 +3139,15 @@
         }
 
         async function loadProjectTree() {
-            const root = localStorage.getItem("projectRoot") || "";
+            // 项目树展示的就是「当前工作区」的目录
+            const ws = currentWorkspace();
+            const root = ws ? ws.path : "";
             if (!root) {
-                document.getElementById("projectTree").innerHTML = '<div style="padding: 8px 12px; color: #9ca3af; font-size: 12px;">（未选择项目）</div>';
+                document.getElementById("projectTree").innerHTML = '<div style="padding: 8px 12px; color: #9ca3af; font-size: 12px;">（未选择工作区）</div>';
+                return;
+            }
+            if (!ws.exists) {
+                document.getElementById("projectTree").innerHTML = `<div style="padding: 8px 12px; color: #ef4444; font-size: 12px;">⚠️ 工作区目录不存在：${escapeHtml(root)}</div>`;
                 return;
             }
             try {
@@ -3246,7 +3794,8 @@
                     session_id: currentSessionId,
                     provider_id: currentProviderId || null,
                     model: currentModelName || null,
-                    project_root: localStorage.getItem("projectRoot") || null,
+                    // 不再传 project_root：工作目录以「会话所属工作区」为准，
+                    // 由后端解析，避免前端全局 localStorage 覆盖其它会话的设置
                 };
                 if (images.length) body.images = images;   // 仅在有图片时才带，避免污染纯文本请求
                 if (multiAgentMode) {
@@ -3430,7 +3979,12 @@
             }
         });
 
-        loadSessions();
+        // 启动顺序很重要：先确定工作区，再按工作区载入会话列表与项目树
+        (async function bootstrap() {
+            await loadWorkspaces();
+            await loadSessions();
+            await loadProjectTree();
+        })();
         loadDocuments();
         loadTrashSummary();
 

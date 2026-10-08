@@ -21,10 +21,13 @@
 """
 
 import contextvars
+import logging
 import secrets
 import threading
 
 from state_store import SessionStateStore
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_SESSION_KEY = "__default__"
 
@@ -107,7 +110,8 @@ def get_effective_rag_base_url():
     return _rag_base_url_var.get() or os.getenv("RAG_BASE_URL", "")
 
 
-# ===== 项目根目录（按会话分桶 + 落库，跨请求保留）=====
+# ===== 工作目录（工作区说了算 + 可按会话临时覆盖）=====
+# 优先级：本会话显式设置 > 会话所属工作区的 path > 用户主目录
 _project_root_store = SessionStateStore("project_root")
 
 
@@ -115,9 +119,38 @@ def set_project_root(path: str, session_id=None):
     _project_root_store.set(session_key(session_id), path)
 
 
+def clear_project_root(session_id=None):
+    """清掉按会话的显式覆盖，让「会话所属工作区」的路径重新生效。
+
+    前端不再自己存项目路径（那是双真相源的老毛病），所以每条 Web 请求都要先清一次
+    历史遗留的覆盖值，否则老会话里存过的路径会一直盖住工作区设置。
+    """
+    _project_root_store.pop(session_key(session_id))
+
+
 def get_project_root(session_id=None):
+    """解析当前工作目录。
+
+    **工作区是唯一真相源**：以前前端把路径存在全局 localStorage 里，后端按会话存，
+    切换会话时前端那份全局值会把别的会话的路径覆盖掉。现在路径由「会话所属工作区」
+    决定，显式设置只作为临时覆盖。
+    """
     import os
-    return _project_root_store.get(session_key(session_id)) or os.path.expanduser("~")
+
+    key = session_key(session_id)
+    path = _project_root_store.get(key)
+    if path:
+        return path
+    try:
+        import db
+
+        if str(key).isdigit():
+            ws = db.get_workspace_of_session(int(key))
+            if ws and ws.get("path"):
+                return ws["path"]
+    except Exception:
+        logger.warning("解析会话所属工作区失败，回退到主目录", exc_info=True)
+    return os.path.expanduser("~")
 
 
 # ===== Pending Session（中断续跑，按会话分桶 + 落库）=====

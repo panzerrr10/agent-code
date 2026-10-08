@@ -5,6 +5,7 @@ from flask import Flask, Response, jsonify, render_template, request, send_file
 
 import auth
 import db
+import paths
 from agent import run_agent_stream
 from config_providers import DEFAULT_PROVIDER, RAG_PROVIDER, get_provider, get_provider_list
 from paths import ICON_PATH, STATIC_DIR, TEMPLATES_DIR, is_path_permitted
@@ -219,13 +220,112 @@ def index():
 # ============ 会话接口 ============
 @app.route("/sessions", methods=["GET"])
 def list_sessions():
-    return jsonify(db.get_all_sessions())
+    """会话列表；带 workspace_id 时只返回该工作区下的会话。"""
+    wid = request.args.get("workspace_id", type=int)
+    return jsonify(db.get_all_sessions(wid))
 
 
 @app.route("/sessions", methods=["POST"])
 def new_session():
-    sid = db.create_session("新对话")
-    return jsonify({"id": sid, "title": "新对话"})
+    """新建会话并归属到指定工作区。
+
+    归属工作区后，这个会话的工作目录就由工作区决定（不再依赖前端 localStorage）。
+    """
+    data = request.get_json(silent=True) or {}
+    wid = data.get("workspace_id")
+    if wid is not None:
+        try:
+            wid = int(wid)
+        except (TypeError, ValueError):
+            wid = None
+    if wid is not None and not db.get_workspace(wid):
+        return jsonify({"error": "工作区不存在"}), 404
+
+    sid = db.create_session("新对话", wid)
+    # 回读实际归属：不传 workspace_id 时 db 会落到默认工作区，
+    # 直接回请求里的值会返回 None，前端就不知道该把它挂在哪个工作区下了
+    session = db.get_session(sid) or {}
+    actual_wid = session.get("workspace_id")
+    if actual_wid is not None:
+        db.touch_workspace(actual_wid)
+    return jsonify({"id": sid, "title": "新对话", "workspace_id": actual_wid})
+
+
+# ============ 工作区 ============
+@app.route("/workspaces", methods=["GET"])
+def list_workspaces():
+    """工作区列表（附会话数、目录是否存在，以及新建时的默认路径）。"""
+    return jsonify(
+        {
+            "workspaces": db.get_all_workspaces(),
+            "default_path": db.default_workspace_path(),
+        }
+    )
+
+
+@app.route("/workspaces", methods=["POST"])
+def create_workspace():
+    """新建工作区：`{name?, path?}`。
+
+    path 留空时用默认位置（`~/PycharmProjects`，本机即 /home/pz/PycharmProjects）。
+    """
+    data = request.get_json(silent=True) or {}
+    raw_path = (data.get("path") or "").strip()
+    path = os.path.abspath(os.path.expanduser(raw_path)) if raw_path else db.default_workspace_path()
+
+    if not paths.is_path_permitted(path):
+        return jsonify({"ok": False, "error": f"该位置不允许作为工作区（敏感目录或越权）：{path}"}), 400
+
+    # 目录不存在就建出来，避免用户选了个还没建的路径后到处报错
+    if not os.path.isdir(path):
+        try:
+            os.makedirs(path, exist_ok=True)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"无法创建目录：{e}"}), 400
+
+    name = (data.get("name") or "").strip() or os.path.basename(path.rstrip(os.sep)) or "工作区"
+    wid = db.create_workspace(name, path)
+    return jsonify({"ok": True, "id": wid, "name": name, "path": path})
+
+
+@app.route("/workspaces/<int:workspace_id>", methods=["PATCH"])
+def patch_workspace(workspace_id):
+    """改名 / 改路径。"""
+    if not db.get_workspace(workspace_id):
+        return jsonify({"ok": False, "error": "工作区不存在"}), 404
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip() or None
+    raw_path = (data.get("path") or "").strip()
+    path = None
+    if raw_path:
+        path = os.path.abspath(os.path.expanduser(raw_path))
+        if not paths.is_path_permitted(path):
+            return jsonify({"ok": False, "error": f"该位置不允许作为工作区：{path}"}), 400
+        if not os.path.isdir(path):
+            try:
+                os.makedirs(path, exist_ok=True)
+            except Exception as e:
+                return jsonify({"ok": False, "error": f"无法创建目录：{e}"}), 400
+    db.update_workspace(workspace_id, name, path)
+    return jsonify({"ok": True, "workspace": db.get_workspace(workspace_id)})
+
+
+@app.route("/workspaces/<int:workspace_id>", methods=["DELETE"])
+def remove_workspace(workspace_id):
+    """删除工作区（连同其下会话）。前端会先提示将删除多少会话。"""
+    if not db.get_workspace(workspace_id):
+        return jsonify({"ok": False, "error": "工作区不存在"}), 404
+    ok, result = db.delete_workspace(workspace_id)
+    if not ok:
+        return jsonify({"ok": False, "error": result}), 400
+    # 清掉这些会话的粘性状态，避免内存泄漏
+    import runtime as _rt_ws
+    from tools import clear_plan
+
+    for sid in result:
+        _rt_ws.clear_session(sid)
+        clear_plan(sid)
+    return jsonify({"ok": True, "deleted_sessions": len(result)})
 
 
 @app.route("/sessions/<int:session_id>", methods=["DELETE"])
@@ -258,7 +358,7 @@ def api_providers():
 
 @app.route("/run", methods=["POST"])
 def run():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     task = data.get("task", "").strip()
     session_id = data.get("session_id")
     resume = data.get("resume", False)   # 用户点 ✓ 后“续跑”：复用 pending state，从原 step 继续
@@ -345,6 +445,11 @@ def run():
             rag_api_key = data.get("rag_api_key") or _rag_cfg["api_key"]
             rag_base_url = data.get("rag_base_url") or _rag_cfg["base_url"]
             project_root = data.get("project_root")
+            if not project_root:
+                # Web 端不再自己传项目路径（避免前端 localStorage 与后端按会话状态
+                # 互为真相源、切会话时互相覆盖）。未显式指定时以「会话所属工作区」
+                # 为准，并清掉历史遗留的按会话覆盖。
+                _rt_run.clear_project_root(session_id)
             if images:
                 print(f"[IMG] received {len(images)} images")   # 只记数量，绝不打印 Base64
 
@@ -429,7 +534,7 @@ def cancel_run():
     """
     import runtime
 
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     session_id = data.get("session_id")
     if session_id is None:
         return jsonify({"error": "缺少 session_id"}), 400
@@ -739,7 +844,7 @@ def api_trash_restore():
     """把某条备份恢复到它的原始路径。"""
     import trash
 
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     ok, message = trash.restore(data.get("id", ""))
     if ok:
         return jsonify({"ok": True, "message": message})
@@ -754,7 +859,7 @@ def api_trash_purge_many():
     """
     import trash as _trash
 
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     ids = data.get("ids")
     if not isinstance(ids, list) or not ids:
         return jsonify({"ok": False, "removed": 0, "message": "未选择任何条目"}), 400
@@ -797,7 +902,7 @@ def run_multi():
     from planner import create_plan
     from reviewer import review
 
-    data = request.json
+    data = request.get_json(silent=True) or {}
     task = data.get("task", "").strip()
     session_id = data.get("session_id")
     resume = data.get("resume", False)   # 用户点 ✓ 后“续跑”：复用 pending state，从原 step 继续
@@ -810,6 +915,9 @@ def run_multi():
         import runtime as _rt_multi
 
         _rt_multi.set_session_id(session_id)
+        # 与 /run 一致：多 Agent 模式也以「会话所属工作区」为工作目录
+        if not (data.get("project_root") or "").strip():
+            _rt_multi.clear_project_root(session_id)
         try:
             # 续跑门控与 /run 一致：挂起确认要令牌，纯「继续」免令牌
             if resume:
