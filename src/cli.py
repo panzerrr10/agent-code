@@ -1,4 +1,4 @@
-#!/home/pz/PycharmProjects/agent-code/.venv/bin/python
+#!/usr/bin/env python3
 """agent-code CLI —— 命令行接口。
 
 用法：

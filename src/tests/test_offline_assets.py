@@ -11,9 +11,11 @@ import re
 import pytest
 
 import app as app_module
+import paths
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VENDOR_DIR = os.path.join(PROJECT_ROOT, "static", "vendor")
+# 前端资源现在统一在 <root>/web/ 下，直接引用 paths 常量避免再次重构时失效
+VENDOR_DIR = os.path.join(paths.STATIC_DIR, "vendor")
+TEMPLATE_FILE = os.path.join(paths.TEMPLATES_DIR, "index.html")
 REQUIRED = [
     "marked.min.js",
     "purify.min.js",
@@ -30,9 +32,7 @@ def test_vendor_files_exist_and_non_trivial():
 
 
 def test_template_has_no_remote_script_or_link():
-    html = open(
-        os.path.join(PROJECT_ROOT, "templates", "index.html"), encoding="utf-8"
-    ).read()
+    html = open(TEMPLATE_FILE, encoding="utf-8").read()
     remote = re.findall(
         r'<(?:script|link)\b[^>]*?(?:src|href)\s*=\s*["\'](https?://[^"\']+)',
         html,

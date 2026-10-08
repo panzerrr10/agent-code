@@ -252,14 +252,26 @@ def test_file_content_rejects_sensitive_path():
 
 
 def test_example_files_contain_no_real_secrets():
-    """示例文件只允许占位符，不允许出现长格式的真实密钥。"""
+    """示例文件只允许占位符，不允许出现长格式的真实密钥。
+
+    注意：这两个文件一个在项目根、一个在 docs/，必须用显式路径定位——
+    历史上这里用「往上找两级」推导过路径，目录一调整就会静默跳过、断言形同虚设。
+    """
     import re
 
+    import paths
+
     secret_re = re.compile(r"sk-[A-Za-z0-9._\-]{40,}|[0-9a-f]{32}\.[A-Za-z0-9]{10,}")
-    for name in (".env.example", "备忘录.txt"):
-        path = os.path.join(PROJECT_ROOT, name)
+    candidates = [
+        os.path.join(paths.BASE_DIR, ".env.example"),
+        os.path.join(paths.BASE_DIR, "docs", "备忘录.txt"),
+    ]
+    checked = 0
+    for path in candidates:
         if not os.path.exists(path):
             continue
+        checked += 1
         text = open(path, encoding="utf-8", errors="ignore").read()
         hits = secret_re.findall(text)
-        assert not hits, f"{name} 疑似仍含真实密钥"
+        assert not hits, f"{os.path.basename(path)} 疑似仍含真实密钥"
+    assert checked > 0, "一个待检查的示例文件都没找到，说明路径定位又失效了"

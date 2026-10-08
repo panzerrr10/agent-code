@@ -1,7 +1,15 @@
-"""统一路径管理，兼容 Linux / Windows / PyInstaller。"""
+"""统一路径管理，兼容 Linux / Windows / PyInstaller。
+
+目录约定：**代码在 `<root>/src/`，前端资源在 `<root>/web/`，运行数据在 `<root>/data/`**。
+因此 `get_base_dir()` 取的是 `src/` 的上一级（项目根），而不是 `paths.py` 自己所在的目录——
+否则一旦调整代码目录，已有的会话 / 知识库 / 访问令牌就会"凭空消失"。
+"""
 
 import os
 import sys
+
+# 本文件所在目录（开发态 = <root>/src）
+_SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def is_frozen() -> bool:
@@ -9,12 +17,14 @@ def is_frozen() -> bool:
 
 
 def get_base_dir() -> str:
+    """项目根目录（开发态下是 src/ 的上一级）。"""
     if is_frozen():
         return os.path.dirname(os.path.abspath(sys.executable))
-    return os.path.dirname(os.path.abspath(__file__))
+    return os.path.dirname(_SRC_DIR)
 
 
 def get_resource_dir() -> str:
+    """打包后的资源解包目录；开发态下等同于项目根。"""
     if is_frozen() and hasattr(sys, "_MEIPASS"):
         return sys._MEIPASS
     return get_base_dir()
@@ -46,8 +56,12 @@ CHROMA_DIR = os.path.join(DATA_DIR, "chroma_db")
 TRASH_DIR = os.path.join(DATA_DIR, ".trash")
 BACKUP_DIR = os.path.join(DATA_DIR, ".backup")
 WEBVIEW_DATA_DIR = os.path.join(DATA_DIR, ".webview_data")
-TEMPLATES_DIR = os.path.join(RESOURCE_DIR, "templates")
-ICON_PATH = os.path.join(RESOURCE_DIR, "icon.png")
+
+# 前端资源：<root>/web/{templates,static,icon.png}
+WEB_DIR = os.path.join(RESOURCE_DIR, "web")
+TEMPLATES_DIR = os.path.join(WEB_DIR, "templates")
+STATIC_DIR = os.path.join(WEB_DIR, "static")
+ICON_PATH = os.path.join(WEB_DIR, "icon.png")
 
 
 def get_user_home() -> str:

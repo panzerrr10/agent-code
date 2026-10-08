@@ -7,9 +7,15 @@ import auth
 import db
 from agent import run_agent_stream
 from config_providers import DEFAULT_PROVIDER, RAG_PROVIDER, get_provider, get_provider_list
-from paths import ICON_PATH, is_path_permitted
+from paths import ICON_PATH, STATIC_DIR, TEMPLATES_DIR, is_path_permitted
 
-app = Flask(__name__)
+# 前端资源在 <root>/web/{templates,static}，必须显式告诉 Flask，
+# 否则它会去 src/ 下找 templates/static，页面与静态资源全 404
+app = Flask(
+    __name__,
+    template_folder=TEMPLATES_DIR,
+    static_folder=STATIC_DIR,
+)
 db.init_db()
 
 

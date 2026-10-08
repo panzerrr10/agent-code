@@ -2,12 +2,12 @@
 # ============================================================
 # agent-code 自举迭代脚本 v2 (Bootstrapping Iteration)
 # 用法: ./iterate.sh [迭代次数]  (默认 1 次)
-# 位置: PycharmProjects/agent-code/iterate.sh
+# 位置: PycharmProjects/agent-code/scripts/iterate.sh
 # 更新: 自动拷贝 .env 到副本，方便 5004 直接启动
 # ============================================================
 
 set -e
-BASE=/home/pz/PycharmProjects
+BASE="${AGENT_CODE_BASE:-/home/pz/PycharmProjects}"   # 可用环境变量覆盖
 MAIN="$BASE/agent-code"           # 主版本（5003 端口）
 COPY="$BASE/agent-code-copy"      # 副本（5004 端口，Agent 修改用）
 ARCHIVE_DIR="$BASE/agent-code-archive"
@@ -71,11 +71,11 @@ for ((i=1; i<=MAX_ITER; i++)); do
 
     # ---- Step 5: 副本端口 5003 → 5004 ----
     echo "[5/7] 修改副本端口 5003 → 5004"
-    if [ -f "$COPY/app.py" ]; then
-        sed -i 's/port=5003/port=5004/g' "$COPY/app.py"
+    if [ -f "$COPY/src/app.py" ]; then
+        sed -i 's/port=5003/port=5004/g' "$COPY/src/app.py"
     fi
-    if [ -f "$COPY/desktop.py" ]; then
-        sed -i 's/5003/5004/g' "$COPY/desktop.py"
+    if [ -f "$COPY/src/desktop.py" ]; then
+        sed -i 's/5003/5004/g' "$COPY/src/desktop.py"
     fi
     echo "  ✅ 端口已改为 5004"
 
@@ -98,15 +98,15 @@ for ((i=1; i<=MAX_ITER; i++)); do
 
     # ---- Step 7: 验证端口 + .env ----
     echo "[7/7] 验证端口和 .env"
-    if grep -q "5003" "$MAIN/app.py" 2>/dev/null; then
-        echo "  ✅ 主版本 $MAIN 端口 = 5003"
+    if grep -q "5003" "$MAIN/src/app.py" 2>/dev/null; then
+        echo "  ✅ 主版本 $MAIN 端口 = 5003（src/app.py）"
     else
-        echo "  ⚠️  主版本 app.py 中未找到 port=5003"
+        echo "  ⚠️  主版本 src/app.py 中未找到 port=5003"
     fi
-    if grep -q "5004" "$COPY/app.py" 2>/dev/null; then
-        echo "  ✅ 副本 $COPY 端口 = 5004"
+    if grep -q "5004" "$COPY/src/app.py" 2>/dev/null; then
+        echo "  ✅ 副本 $COPY 端口 = 5004（src/app.py）"
     else
-        echo "  ⚠️  副本 app.py 中未找到 port=5004"
+        echo "  ⚠️  副本 src/app.py 中未找到 port=5004"
     fi
     [ -f "$COPY/.env" ] && echo "  ✅ 副本 .env 已就绪" || echo "  ⚠️  副本 .env 缺失"
 
@@ -117,8 +117,8 @@ for ((i=1; i<=MAX_ITER; i++)); do
     echo "  → $COPY"
     echo ""
     echo "验证通过后，如需合入主版本（按改动文件精准合入，不要全量覆盖）："
-    echo "  cp $COPY/agent.py $MAIN/agent.py"
-    echo "  cp $COPY/app.py   $MAIN/app.py   # 注意：主版本 app.py 端口是 5003"
+    echo "  cp $COPY/src/agent.py $MAIN/src/agent.py"
+    echo "  cp $COPY/src/app.py   $MAIN/src/app.py   # 注意：主版本端口是 5003"
     echo ""
 
     if [ $i -lt $MAX_ITER ]; then

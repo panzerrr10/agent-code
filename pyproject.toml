@@ -2,7 +2,9 @@
 # 运行依赖统一在 requirements.txt / requirements-dev.txt 里声明，避免两处漂移。
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# 代码与测试都在 src/ 下（src/ 会被 pytest 自动加入 sys.path，
+# 因此测试里的 `import db` / `import tools` 这类顶层导入照旧可用）
+testpaths = ["src/tests"]
 addopts = "-q"
 
 [tool.black]
