@@ -23,6 +23,8 @@ import tempfile
 # 必须在导入项目模块之前设置：paths 在 import 时就固定了 DB_PATH
 _TMP_DIR = tempfile.mkdtemp(prefix="agentcode-test-")
 os.environ.setdefault("AGENT_DB_PATH", os.path.join(_TMP_DIR, "chat.db"))
+# 界面里填的 provider 密钥也要落到临时目录，否则测试会写进真实的 data/providers.json
+os.environ.setdefault("AGENT_SETTINGS_PATH", os.path.join(_TMP_DIR, "providers.json"))
 
 import pytest  # noqa: E402
 
@@ -32,7 +34,7 @@ import trash  # noqa: E402
 
 
 def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
-    """整个测试会话结束后清掉临时数据库目录。"""
+    """整个测试会话结束后清掉临时数据库目录（含 providers.json）。"""
     shutil.rmtree(_TMP_DIR, ignore_errors=True)
 
 

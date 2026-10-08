@@ -96,6 +96,13 @@ def init_db():
     cols = {row[1] for row in cursor.execute("PRAGMA table_info(sessions)")}
     if "workspace_id" not in cols:
         cursor.execute("ALTER TABLE sessions ADD COLUMN workspace_id INTEGER")
+    # 工作区里「右侧文件面板」打开过的文件路径（JSON 数组）。
+    # 存服务端而不是 localStorage：换浏览器 / 清缓存 / 重启进程都还在，
+    # 而且这本来就该跟着工作区走。
+    wcols = {row[1] for row in cursor.execute("PRAGMA table_info(workspaces)")}
+    if "open_files" not in wcols:
+        cursor.execute("ALTER TABLE workspaces ADD COLUMN open_files TEXT")
+
     # 会话级权限等级：1 只读 / 2 确认（默认）/ 3 完全。
     # 存在会话上而不是做全局开关，是因为同一工作区里「只读看代码」和「放手重构」
     # 是完全不同的诉求，而且本应用支持多会话并行跑，全局开关做不到这个区分。
@@ -321,6 +328,38 @@ def get_workspace(workspace_id: int):
         "last_used_at": row[4],
         "exists": os.path.isdir(row[2]),
     }
+
+
+def get_workspace_open_files(workspace_id: int) -> list:
+    """取该工作区「右侧文件面板」打开过的文件路径列表。"""
+    import json
+
+    conn = _connect()
+    row = conn.execute(
+        "SELECT open_files FROM workspaces WHERE id = ?", (workspace_id,)
+    ).fetchone()
+    conn.close()
+    if not row or not row[0]:
+        return []
+    try:
+        data = json.loads(row[0])
+        return [p for p in data if isinstance(p, str)] if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def set_workspace_open_files(workspace_id: int, paths: list) -> None:
+    """保存该工作区打开过的文件路径（只存路径，内容重启后重新从磁盘读）。"""
+    import json
+
+    clean = [p for p in (paths or []) if isinstance(p, str) and p.strip()][:50]
+    conn = _connect()
+    conn.execute(
+        "UPDATE workspaces SET open_files = ? WHERE id = ?",
+        (json.dumps(clean, ensure_ascii=False), workspace_id),
+    )
+    conn.commit()
+    conn.close()
 
 
 def get_workspace_of_session(session_id: int):

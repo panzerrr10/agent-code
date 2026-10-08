@@ -564,6 +564,65 @@ def new_session():
     return jsonify({"id": sid, "title": "新对话", "workspace_id": actual_wid})
 
 
+# ============ 设置：provider 密钥 / URL ============
+def _valid_base_url(url: str) -> bool:
+    return url.startswith("http://") or url.startswith("https://")
+
+
+@app.route("/api/settings/keys", methods=["POST"])
+def save_provider_key():
+    """保存某个 provider 的 api_key / base_url。
+
+    **密钥只进不出**：这里收下后写进 ``data/providers.json``（权限 600），
+    之后任何接口都只返回掩码（``sk-…abcd``），绝不回传完整密钥。
+    """
+    from config_providers import (
+        PROVIDERS,
+        clear_provider_credentials,
+        set_provider_credentials,
+    )
+
+    data = request.get_json(silent=True) or {}
+    pid = (data.get("provider_id") or "").strip()
+    if pid not in PROVIDERS:
+        return jsonify({"ok": False, "error": f"未知的 provider：{pid}"}), 400
+
+    api_key = data.get("api_key")
+    base_url = data.get("base_url")
+
+    if isinstance(api_key, str):
+        api_key = api_key.strip()
+    else:
+        api_key = None
+
+    if isinstance(base_url, str):
+        base_url = base_url.strip()
+        if base_url and not _valid_base_url(base_url):
+            return jsonify({"ok": False, "error": "Base URL 必须以 http:// 或 https:// 开头"}), 400
+    else:
+        base_url = None
+
+    if api_key == "" and base_url in (None, ""):
+        clear_provider_credentials(pid)
+    else:
+        set_provider_credentials(pid, api_key, base_url)
+
+    # 日志里绝不出现密钥本身
+    logger.info("更新 provider 配置：%s（key=%s）", pid, "已设置" if api_key else "未改动")
+    return jsonify({"ok": True, "providers": get_provider_list()})
+
+
+@app.route("/api/settings/keys/<provider_id>", methods=["DELETE"])
+def delete_provider_key(provider_id):
+    """清除界面里保存的密钥（.env 里的仍会生效）。"""
+    from config_providers import PROVIDERS, clear_provider_credentials
+
+    if provider_id not in PROVIDERS:
+        return jsonify({"ok": False, "error": f"未知的 provider：{provider_id}"}), 400
+    clear_provider_credentials(provider_id)
+    return jsonify({"ok": True, "providers": get_provider_list()})
+
+
 # ============ 会话权限等级 ============
 PERMISSION_LABELS = {1: "只读", 2: "确认", 3: "完全"}
 
@@ -651,6 +710,31 @@ def create_workspace():
     name = (data.get("name") or "").strip() or os.path.basename(path.rstrip(os.sep)) or "工作区"
     wid = db.create_workspace(name, path)
     return jsonify({"ok": True, "id": wid, "name": name, "path": path})
+
+
+@app.route("/workspaces/<int:workspace_id>/open_files", methods=["GET"])
+def get_workspace_open_files(workspace_id):
+    """该工作区在右侧文件面板里打开过的文件（供重启/切回时恢复）。"""
+    if not db.get_workspace(workspace_id):
+        return jsonify({"ok": False, "error": "工作区不存在"}), 404
+    return jsonify({"ok": True, "paths": db.get_workspace_open_files(workspace_id)})
+
+
+@app.route("/workspaces/<int:workspace_id>/open_files", methods=["PUT"])
+def put_workspace_open_files(workspace_id):
+    """保存该工作区打开的文件路径列表。
+
+    只保留仍然合法（白名单内）的路径，避免记录里堆积已越权/失效的条目。
+    """
+    if not db.get_workspace(workspace_id):
+        return jsonify({"ok": False, "error": "工作区不存在"}), 404
+    data = request.get_json(silent=True) or {}
+    paths = data.get("paths")
+    if not isinstance(paths, list):
+        return jsonify({"ok": False, "error": "paths 必须是数组"}), 400
+    safe = [p for p in paths if isinstance(p, str) and is_path_permitted(p)]
+    db.set_workspace_open_files(workspace_id, safe)
+    return jsonify({"ok": True, "count": len(safe)})
 
 
 @app.route("/workspaces/<int:workspace_id>", methods=["PATCH"])

@@ -12,10 +12,13 @@ DeepSeek / 阿里云百炼 / 智谱 AI / OpenAI。
 
 # 模型名以各家官方文档为准；若你开通的模型名不同，直接改下面 PROVIDERS 的 models。
 
+import json
 import logging
 import os
 
 from dotenv import load_dotenv
+
+from paths import DATA_DIR
 
 # 本模块在 import 时就用 os.getenv 构建 PROVIDERS，因此必须自己先加载 .env。
 # 否则「谁先 import」会决定密钥是否读得到——import 顺序一变密钥就全空，非常脆弱。
@@ -65,11 +68,88 @@ DEFAULT_PROVIDER = "deepseek"
 RAG_PROVIDER = "bailian"   # RAG 专用的 embedding provider（锁死阿里云百炼）
 
 
+# ===== 用户可在「设置」里填写的密钥 / URL =====
+# 优先级：providers.json（界面里填的） > .env（环境变量） > 内置默认
+# 之所以把界面里填的放在最前：用户在 UI 里改完就该立刻生效，不该被 .env 盖回去。
+SETTINGS_FILE = os.environ.get("AGENT_SETTINGS_PATH") or os.path.join(
+    DATA_DIR, "providers.json"
+)
+
+
+def load_overrides() -> dict:
+    """读取界面里保存的 provider 覆盖（api_key / base_url）。"""
+    try:
+        with open(SETTINGS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        logger.warning("读取 %s 失败，忽略界面配置", SETTINGS_FILE, exc_info=True)
+        return {}
+
+
+def save_overrides(data: dict) -> None:
+    os.makedirs(os.path.dirname(SETTINGS_FILE) or ".", exist_ok=True)
+    tmp = SETTINGS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, SETTINGS_FILE)
+    # 密钥文件只给本人读写
+    try:
+        os.chmod(SETTINGS_FILE, 0o600)
+    except OSError:
+        pass
+
+
+def set_provider_credentials(
+    provider_id: str, api_key: str | None = None, base_url: str | None = None
+) -> None:
+    """保存某个 provider 的密钥 / URL。api_key 传空字符串表示清除。"""
+    data = load_overrides()
+    entry = dict(data.get(provider_id) or {})
+    if api_key is not None:
+        entry["api_key"] = api_key
+    if base_url is not None:
+        entry["base_url"] = base_url
+    entry = {k: v for k, v in entry.items() if v}   # 空值即删除
+    if entry:
+        data[provider_id] = entry
+    else:
+        data.pop(provider_id, None)
+    save_overrides(data)
+
+
+def clear_provider_credentials(provider_id: str) -> None:
+    data = load_overrides()
+    data.pop(provider_id, None)
+    save_overrides(data)
+
+
+def key_hint(api_key: str) -> str:
+    """把密钥变成可展示的掩码：sk-…abcd。
+
+    **永远不要在接口里回传完整密钥** —— 浏览器拿得到就等于泄漏。
+    """
+    if not api_key:
+        return ""
+    if len(api_key) <= 10:
+        return "•" * len(api_key)
+    return f"{api_key[:3]}…{api_key[-4:]}"
+
+
+def mask_placeholder(key: str) -> bool:
+    """判断是不是 .env.example 那种占位符（不算「已配置」）。"""
+    if not key:
+        return True
+    return any(kw.lower() in key.lower() for kw in ("你的", "your", "placeholder", "xxx"))
+
+
 def get_provider(provider_id: str) -> dict:
     """返回指定 provider 的完整配置（含 api_key / base_url / default_model）。
 
     找不到 provider_id 时回退到 DEFAULT_PROVIDER。
-    api_key 为空时不抛异常（允许运行时为空），仅打一条 warning 日志。
+    **返回的是副本**：调用方改它不会污染全局 PROVIDERS。
     """
     provider = PROVIDERS.get(provider_id)
     if provider is None:
@@ -77,13 +157,20 @@ def get_provider(provider_id: str) -> dict:
         provider_id = DEFAULT_PROVIDER
         provider = PROVIDERS[DEFAULT_PROVIDER]
 
-    if not provider.get("api_key"):
+    merged = dict(provider)
+    override = load_overrides().get(provider_id) or {}
+    if override.get("api_key"):
+        merged["api_key"] = override["api_key"]
+    if override.get("base_url"):
+        merged["base_url"] = override["base_url"]
+
+    if not merged.get("api_key") or mask_placeholder(merged.get("api_key", "")):
         logger.warning(
-            "provider=%r 的 api_key 为空，请检查环境变量是否已配置（见 .env）",
+            "provider=%r 尚未配置可用的 api_key（可在界面「设置」里填，或写到 .env）",
             provider_id,
         )
 
-    return provider
+    return merged
 
 
 def get_provider_list() -> list:
@@ -93,12 +180,10 @@ def get_provider_list() -> list:
     has_key 用于前端判断该 provider 是否已配置密钥（未配置时显示灰色标记）。
     """
     result = []
-    placeholders = ["你的", "your", "placeholder"]
-    for pid, p in PROVIDERS.items():
+    overrides = load_overrides()
+    for pid in PROVIDERS:
+        p = get_provider(pid)          # 已合并界面配置
         key = p.get("api_key", "")
-        has_key = bool(key) and not any(
-            kw.lower() in key.lower() for kw in placeholders
-        )
         result.append({
             "id": pid,
             "name": p["name"],
@@ -106,7 +191,11 @@ def get_provider_list() -> list:
             "models": p["models"],
             "default_model": p["default_model"],
             "supports_embedding": p.get("supports_embedding", False),
-            "has_key": has_key,
+            "has_key": not mask_placeholder(key),
+            # 只给掩码，**绝不下发完整密钥**
+            "key_hint": key_hint(key) if not mask_placeholder(key) else "",
+            "base_url": p.get("base_url", ""),
+            "from_settings": bool((overrides.get(pid) or {}).get("api_key")),
         })
     return result
 
