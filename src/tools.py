@@ -1804,7 +1804,7 @@ def _mcp_tools_for_task(task_lower: str) -> list:
     for sc in schemas:
         entry = mcp_client.resolve(sc["function"]["name"])
         if entry:
-            by_server.setdefault(entry[0], []).append(sc)
+            by_server.setdefault(entry["server"], []).append(sc)
 
     picked = []
     for name, items in by_server.items():

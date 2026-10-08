@@ -44,6 +44,7 @@ DEFAULT_SERVER = {
     "command": "",
     "args": [],
     "url": "",
+    "headers": {},           # http/sse 用的请求头（可能含 token，接口只回键名）
     "env": {},
     "cwd": "",
     "enabled": False,        # 装上 ≠ 启用
@@ -52,6 +53,14 @@ DEFAULT_SERVER = {
     "inject": "auto",        # 按需注入
     "keywords": [],
     "timeout": 30,
+    "auto_reconnect": True,   # 进程挂掉后自动拉起（看门狗）
+    # ---- 沙箱（二期）----
+    # 默认 False：宿主执行。改成 True 会把 server 关进 Docker，
+    # **但注意默认镜像里没有 node**，npx 类插件跑不起来，需要 node 镜像
+    # （见 scripts/mcp-sandbox.Dockerfile）。python/uvx 类插件可直接沙箱。
+    "sandbox": False,
+    "sandbox_image": "agent-sandbox",
+    "sandbox_mounts": [],    # 要挂进容器的宿主目录（读写，挂到同路径）
 }
 
 
@@ -98,11 +107,20 @@ def normalize(name: str, raw: dict) -> dict:
         cfg["inject"] = "auto"
     cfg["enabled"] = bool(cfg["enabled"])
     cfg["allow_network"] = bool(cfg["allow_network"])
+    cfg["auto_reconnect"] = bool(cfg["auto_reconnect"])
     if not isinstance(cfg["args"], list):
         cfg["args"] = []
     cfg["args"] = [str(a) for a in cfg["args"]]
     if not isinstance(cfg["env"], dict):
         cfg["env"] = {}
+    if not isinstance(cfg["headers"], dict):
+        cfg["headers"] = {}
+    cfg["headers"] = {str(k): str(v) for k, v in cfg["headers"].items()}
+    cfg["sandbox"] = bool(cfg["sandbox"])
+    cfg["sandbox_image"] = str(cfg["sandbox_image"] or "agent-sandbox").strip()
+    if not isinstance(cfg["sandbox_mounts"], list):
+        cfg["sandbox_mounts"] = []
+    cfg["sandbox_mounts"] = [str(m) for m in cfg["sandbox_mounts"] if str(m).strip()]
     if not isinstance(cfg["keywords"], list):
         cfg["keywords"] = []
     cfg["keywords"] = [str(k) for k in cfg["keywords"] if str(k).strip()]
@@ -128,6 +146,13 @@ def validate(name: str, raw: dict) -> tuple[dict | None, str | None]:
     else:
         if not str(cfg["url"]).startswith(("http://", "https://")):
             return None, "URL 必须以 http:// 或 https:// 开头"
+
+    if cfg["sandbox"]:
+        for m in cfg["sandbox_mounts"]:
+            if not os.path.isdir(m):
+                return None, f"沙箱挂载目录不存在：{m}"
+        if cfg["transport"] != "stdio":
+            return None, "只有 stdio 类型的插件支持沙箱运行"
 
     shadow = shadowing_name(name)
     if shadow:

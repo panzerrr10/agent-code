@@ -577,6 +577,17 @@ def new_session():
 
 
 # ============ MCP 插件 ============
+def real_tool_names(server_name: str) -> list:
+    """该 server 提供的**真实工具**名（不含 resources/prompts 合成出来的）。"""
+    import mcp_client
+
+    names = []
+    for entry in mcp_client.registry_snapshot():
+        if entry["server"] == server_name and entry["kind"] == "tool":
+            names.append(entry["name"])
+    return sorted(names)
+
+
 def _mcp_overview() -> dict:
     """服务器列表 + 运行状态。**不含任何密钥类字段**（env 只回键名）。"""
     import mcp_client
@@ -589,16 +600,17 @@ def _mcp_overview() -> dict:
         # env 里可能有 token，只回键名不回值
         item["env_keys"] = sorted((cfg.get("env") or {}).keys())
         item.pop("env", None)
+        # headers 里可能有 token，同样只回键名
+        item["header_keys"] = sorted((cfg.get("headers") or {}).keys())
+        item.pop("headers", None)
         item.update({
             "runtime_status": status["status"],
             "runtime_error": status["error"],
             "tool_count": status["tool_count"],
-            "tools": [
-                t["function"]["name"].split("__", 2)[-1]
-                for t in mcp_client.tool_schemas()
-                if mcp_client.resolve(t["function"]["name"])
-                and mcp_client.resolve(t["function"]["name"])[0] == cfg["name"]
-            ],
+            "resource_count": status.get("resource_count", 0),
+            "prompt_count": status.get("prompt_count", 0),
+            "restart_count": status.get("restart_count", 0),
+            "tools": real_tool_names(cfg["name"]),
         })
         servers.append(item)
 
@@ -684,6 +696,27 @@ def mcp_reconnect(name):
     mcp_client.disconnect(name)
     ok, msg = mcp_client.connect(name)
     return jsonify({"ok": ok, "message": msg, **_mcp_overview()})
+
+
+@app.route("/api/mcp/catalog", methods=["GET"])
+def mcp_catalog():
+    """内置插件目录（含运行时是否可用）。"""
+    import mcp_catalog
+
+    return jsonify({"ok": True, "catalog": mcp_catalog.list_catalog()})
+
+
+@app.route("/api/mcp/catalog/<item_id>/config", methods=["POST"])
+def mcp_catalog_config(item_id):
+    """把目录模板 + 占位符填值，生成一份插件配置（**不落盘**，前端确认后再提交）。"""
+    import mcp_catalog
+
+    data = request.get_json(silent=True) or {}
+    cfg, err = mcp_catalog.build_config(item_id, data.get("values") or {}, data.get("name"))
+    if err:
+        return jsonify({"ok": False, "error": err}), 400
+    cfg["name"] = data.get("name") or item_id
+    return jsonify({"ok": True, "config": cfg})
 
 
 @app.route("/api/mcp/inject", methods=["POST"])

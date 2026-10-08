@@ -188,7 +188,8 @@ def _confirm_event(func_name: str, args: dict, token: str) -> dict:
         import mcp_client
 
         entry = mcp_client.resolve(func_name)
-        server, tool = entry if entry else ("?", func_name)
+        server = entry["server"] if entry else "?"
+        tool = entry["name"] if entry else func_name
         try:
             pretty = _json.dumps(args or {}, ensure_ascii=False, indent=2)
         except Exception:

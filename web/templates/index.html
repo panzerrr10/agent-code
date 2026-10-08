@@ -2040,6 +2040,30 @@
 
         .mcp-actions { display: flex; gap: 8px; margin-top: 9px; }
 
+        .mcp-catalog {
+            margin-top: 10px;
+            max-height: 320px;
+            overflow-y: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 8px;
+            background: #f9fafb;
+        }
+
+        .cat-row {
+            border-bottom: 1px solid #eef0f3;
+            padding: 8px 4px;
+        }
+
+        .cat-row:last-child { border-bottom: none; }
+        .cat-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .cat-desc { font-size: 11.5px; color: #4b5563; margin-top: 3px; line-height: 1.6; }
+        .mcp-tag.ok { background: #d1fae5; color: #065f46; }
+        .mcp-tag.warn { background: #fee2e2; color: #991b1b; }
+        body.dark .mcp-catalog { background: #1b1f27; border-color: #2a2f3a; }
+        body.dark .cat-row { border-color: #2a2f3a; }
+        body.dark .cat-desc { color: #9ca3af; }
+
         .mcp-form {
             margin-top: 11px;
             border: 1px solid #e5e7eb;
@@ -2864,9 +2888,12 @@
                     </label>
                     <div id="mcpServers" class="mcp-list"></div>
                     <div class="mcp-actions">
-                        <button class="fp-btn" onclick="showMcpForm()">+ 添加插件</button>
+                        <button class="fp-btn" onclick="showMcpCatalog()">📦 从目录添加</button>
+                        <button class="fp-btn" onclick="showMcpForm()">+ 手动添加</button>
                         <button class="fp-btn" onclick="loadMcpServers()">↻ 刷新状态</button>
                     </div>
+
+                    <div id="mcpCatalog" class="mcp-catalog" style="display: none;"></div>
 
                     <div id="mcpForm" class="mcp-form" style="display: none;">
                         <div class="mcp-field">
@@ -2874,13 +2901,25 @@
                             <input type="text" id="mcpName" placeholder="filesystem（只能用字母数字_-）">
                         </div>
                         <div class="mcp-field">
+                            <label>类型</label>
+                            <select id="mcpTransport" onchange="onMcpTransportChange()">
+                                <option value="stdio">stdio · 本地进程（最常用）</option>
+                                <option value="http">http · 远程 streamable-http</option>
+                                <option value="sse">sse · 远程 SSE（旧式）</option>
+                            </select>
+                        </div>
+                        <div class="mcp-field mcp-stdio-only">
                             <label>启动命令</label>
                             <input type="text" id="mcpCommand" placeholder="npx">
                         </div>
-                        <div class="mcp-field">
+                        <div class="mcp-field mcp-stdio-only">
                             <label>参数</label>
                             <input type="text" id="mcpArgs" placeholder="-y @modelcontextprotocol/server-filesystem /home/pz/下载">
                             <span class="set-hint" style="margin: 0;">空格分隔</span>
+                        </div>
+                        <div class="mcp-field mcp-remote-only" style="display: none;">
+                            <label>URL</label>
+                            <input type="text" id="mcpUrl" placeholder="https://example.com/mcp">
                         </div>
                         <div class="mcp-field">
                             <label>权限档位</label>
@@ -2903,9 +2942,36 @@
                             <label>关键词</label>
                             <input type="text" id="mcpKeywords" placeholder="逗号分隔，auto 模式下用（留空则用名称与工具名）">
                         </div>
+                        <div class="mcp-stdio-only">
+                            <label class="mcp-net">
+                                <input type="checkbox" id="mcpSandbox" onchange="onMcpSandboxChange()">
+                                <span>📦 在 Docker 沙箱里运行（推荐）</span>
+                            </label>
+                            <div id="mcpSandboxOpts" style="display: none;">
+                                <div class="mcp-field">
+                                    <label>镜像</label>
+                                    <input type="text" id="mcpSandboxImage" placeholder="agent-mcp-sandbox">
+                                </div>
+                                <div class="mcp-field">
+                                    <label>挂载目录</label>
+                                    <input type="text" id="mcpSandboxMounts" placeholder="/home/pz/下载（逗号分隔）">
+                                </div>
+                                <p class="set-hint" style="margin: 0 0 7px;">
+                                    沙箱里<b>看不到</b>没挂载的目录，断网由下面的联网开关控制。
+                                    npx 类插件需要 <code>agent-mcp-sandbox</code> 镜像
+                                    （<code>docker build -f scripts/mcp-sandbox.Dockerfile -t agent-mcp-sandbox .</code>）。
+                                </p>
+                            </div>
+                        </div>
+
                         <label class="mcp-net">
                             <input type="checkbox" id="mcpAllowNetwork">
                             <span>🌐 允许该插件联网</span>
+                        </label>
+
+                        <label class="mcp-net">
+                            <input type="checkbox" id="mcpAutoReconnect" checked>
+                            <span>🔁 进程挂掉后自动重连（看门狗）</span>
                         </label>
                         <div class="mcp-form-btns">
                             <button class="fp-btn primary" onclick="saveMcpServer()">保存</button>
@@ -3871,7 +3937,10 @@
                     }
                 });
             }
-            loadProjectRoot();
+            // 注意：这里原来还有一句 loadProjectRoot()，那个函数在改成「工作区」模型时
+            // 已经删掉了。它抛的 ReferenceError 会**中断本 handler 后面的语句**，
+            // 导致 loadProjectTree() / restoreProjectTreeState() 从来没执行过
+            // （项目树的折叠状态因此一直恢复不了）。已删除。
             loadProjectTree();
             restoreProjectTreeState();
         });
@@ -4746,6 +4815,7 @@
 
         // ===== MCP 插件 =====
         let mcpData = { servers: [], inject_enabled: true };
+        // 目录数据按需加载
 
         async function loadMcpServers() {
             try {
@@ -4794,6 +4864,10 @@
                         <span class="mcp-tag">${escapeHtml(permLabel)}</span>
                         <span class="mcp-tag">${escapeHtml(sv.inject)}</span>
                         ${sv.allow_network ? '<span class="mcp-tag net">🌐 已授权联网</span>' : '<span class="mcp-tag">🔒 不联网</span>'}
+                        ${sv.sandbox ? '<span class="mcp-tag ok">📦 沙箱</span>' : '<span class="mcp-tag warn">⚠️ 跑在宿主机</span>'}
+                        ${sv.resource_count ? `<span class="mcp-tag">${sv.resource_count} 资源</span>` : ""}
+                        ${sv.prompt_count ? `<span class="mcp-tag">${sv.prompt_count} 提示词</span>` : ""}
+                        ${sv.restart_count ? `<span class="mcp-tag warn">重连 ${sv.restart_count} 次</span>` : ""}
                     </div>
                     ${tools}${err}
                     <div class="mcp-row-btns">
@@ -4846,18 +4920,109 @@
         function showMcpForm(prefill) {
             const f = document.getElementById("mcpForm");
             f.style.display = "block";
-            const v = prefill || { name: "", command: "", args: [], permission: "mutate", inject: "auto", keywords: [], allow_network: false };
+            const v = prefill || {};
             document.getElementById("mcpName").value = v.name || "";
             document.getElementById("mcpName").readOnly = !!prefill;   // 改名会丢注册，禁止
+            document.getElementById("mcpTransport").value = v.transport || "stdio";
             document.getElementById("mcpCommand").value = v.command || "";
             document.getElementById("mcpArgs").value = (v.args || []).join(" ");
+            document.getElementById("mcpUrl").value = v.url || "";
             document.getElementById("mcpPermission").value = v.permission || "mutate";
             document.getElementById("mcpInject").value = v.inject || "auto";
             document.getElementById("mcpKeywords").value = (v.keywords || []).join(",");
             document.getElementById("mcpAllowNetwork").checked = !!v.allow_network;
+            document.getElementById("mcpAutoReconnect").checked = v.auto_reconnect !== false;
+            document.getElementById("mcpSandbox").checked = !!v.sandbox;
+            document.getElementById("mcpSandboxImage").value = v.sandbox_image || "agent-mcp-sandbox";
+            document.getElementById("mcpSandboxMounts").value = (v.sandbox_mounts || []).join(", ");
+            onMcpTransportChange();
+            onMcpSandboxChange();
         }
 
-        function hideMcpForm() { document.getElementById("mcpForm").style.display = "none"; }
+        /** stdio 与远程类型的字段互斥显示。 */
+        function onMcpTransportChange() {
+            const t = document.getElementById("mcpTransport").value;
+            const stdio = (t === "stdio");
+            document.querySelectorAll("#mcpForm .mcp-stdio-only").forEach(e => e.style.display = stdio ? "" : "none");
+            document.querySelectorAll("#mcpForm .mcp-remote-only").forEach(e => e.style.display = stdio ? "none" : "");
+        }
+
+        function onMcpSandboxChange() {
+            const on = document.getElementById("mcpSandbox").checked;
+            document.getElementById("mcpSandboxOpts").style.display = on ? "block" : "none";
+        }
+
+        function hideMcpForm() {
+            document.getElementById("mcpForm").style.display = "none";
+            document.getElementById("mcpCatalog").style.display = "none";
+        }
+
+        // ===== 内置插件目录 =====
+        let mcpCatalogData = [];
+
+        async function showMcpCatalog() {
+            const box = document.getElementById("mcpCatalog");
+            if (box.style.display !== "none") { box.style.display = "none"; return; }
+            box.style.display = "block";
+            box.innerHTML = `<div class="set-hint">加载中…</div>`;
+            try {
+                const res = await fetch("/api/mcp/catalog");
+                const j = await res.json();
+                mcpCatalogData = j.catalog || [];
+            } catch (e) {
+                box.innerHTML = `<div class="mcp-err">目录加载失败：${escapeHtml(e.message)}</div>`;
+                return;
+            }
+            box.innerHTML = mcpCatalogData.map(it => {
+                const disabled = it.runtime_available ? "" : "disabled";
+                const tag = it.runtime_available
+                    ? ""
+                    : `<span class="mcp-tag">缺少 ${escapeHtml(it.runtime)}</span>`;
+                const net = it.needs_network ? `<span class="mcp-tag net">🌐 需要联网</span>` : "";
+                const box_ = it.recommend_sandbox ? `<span class="mcp-tag">📦 建议沙箱</span>` : "";
+                return `
+                <div class="cat-row">
+                    <div class="cat-head">
+                        <span class="mcp-name">${it.icon} ${escapeHtml(it.name)}</span>
+                        <button class="fp-btn primary" ${disabled}
+                            onclick="pickCatalog('${it.id}')">添加</button>
+                    </div>
+                    <div class="cat-desc">${escapeHtml(it.description)}</div>
+                    <div class="mcp-meta">${tag}${net}${box_}
+                        <span class="mcp-tag">${escapeHtml(it.permission)}</span>
+                    </div>
+                    ${it.notes ? `<div class="set-hint" style="margin-top:4px;">${escapeHtml(it.notes)}</div>` : ""}
+                </div>`;
+            }).join("");
+        }
+
+        function pickCatalog(id) {
+            const it = mcpCatalogData.find(x => x.id === id);
+            if (!it) return;
+            if (!it.runtime_available) {
+                alert(`这一项需要 ${it.runtime}（${it.runtime_hint}），本机没有装。`);
+                return;
+            }
+            // 收集占位符
+            let values = {};
+            for (const ph of (it.placeholders || [])) {
+                const v = prompt(`${it.name} · ${ph.label}`, ph.default || "");
+                if (v === null) return;
+                values[ph.key] = v;
+            }
+            fetch(`/api/mcp/catalog/${encodeURIComponent(id)}/config`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: id, values }),
+            })
+                .then(r => r.json())
+                .then(j => {
+                    if (!j.ok) { alert(j.error || "生成配置失败"); return; }
+                    document.getElementById("mcpCatalog").style.display = "none";
+                    showMcpForm(j.config);
+                })
+                .catch(e => alert("生成配置失败：" + e.message));
+        }
 
         function editMcpServer(name) {
             const sv = mcpData.servers.find(x => x.name === name);
@@ -4873,16 +5038,30 @@
                 document.getElementById("mcpAllowNetwork").checked = false;
                 return;
             }
+            const transport = document.getElementById("mcpTransport").value;
+            const useSandbox = document.getElementById("mcpSandbox").checked;
+            if (useSandbox && !confirm(
+                `把「${name}」放进 Docker 沙箱运行？\n\n` +
+                `它会只能看到你在「挂载目录」里列的路径，联网由上面的开关控制。`)) {
+                document.getElementById("mcpSandbox").checked = false;
+                return;
+            }
             const body = {
                 name,
-                transport: "stdio",
+                transport,
                 command: document.getElementById("mcpCommand").value.trim(),
                 // 参数按空格切分；带空格的路径请用引号
                 args: args ? args.match(/(?:[^\s"]+|"[^"]*")+/g).map(a => a.replace(/^"|"$/g, "")) : [],
+                url: document.getElementById("mcpUrl").value.trim(),
                 permission: document.getElementById("mcpPermission").value,
                 inject: document.getElementById("mcpInject").value,
                 keywords: document.getElementById("mcpKeywords").value.split(",").map(k => k.trim()).filter(Boolean),
                 allow_network: allowNet,
+                auto_reconnect: document.getElementById("mcpAutoReconnect").checked,
+                sandbox: useSandbox,
+                sandbox_image: document.getElementById("mcpSandboxImage").value.trim() || "agent-mcp-sandbox",
+                sandbox_mounts: document.getElementById("mcpSandboxMounts").value
+                    .split(",").map(m => m.trim()).filter(Boolean),
                 enabled: (mcpData.servers.find(x => x.name === name) || {}).enabled || false,
             };
             const j = await mcpPost("/api/mcp/servers", body);
@@ -5171,7 +5350,7 @@
             }
             if (files.length) {
                 e.preventDefault();
-                handleImageFiles(files);
+                addImageFiles(files);   // 函数已改名为 addImageFiles，这里漏改过
             }
         });
 
