@@ -44,6 +44,9 @@ def isolate_env() -> str:
     with open(mcp, "w", encoding="utf-8") as f:
         json.dump({"servers": {}, "inject_enabled": False}, f)
     os.environ["AGENT_MCP_PATH"] = mcp
+    # 回收站同样要隔离：评估里每条任务都会改文件、每次改动都留备份，
+    # 不隔离的话跑一轮就往用户真实的 data/.trash 里塞一批垃圾。
+    os.environ["AGENT_TRASH_DIR"] = os.path.join(d, "trash")
     src = os.path.join(ROOT, "src")
     if src not in sys.path:
         sys.path.insert(0, src)

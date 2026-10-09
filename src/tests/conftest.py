@@ -27,6 +27,8 @@ os.environ.setdefault("AGENT_DB_PATH", os.path.join(_TMP_DIR, "chat.db"))
 os.environ.setdefault("AGENT_SETTINGS_PATH", os.path.join(_TMP_DIR, "providers.json"))
 # MCP 插件配置同理：测试不能读写真实的 data/mcp.json
 os.environ.setdefault("AGENT_MCP_PATH", os.path.join(_TMP_DIR, "mcp.json"))
+# 回收站也要隔离：只隔离 DB 的话，跑一批任务会往真实 data/.trash 里塞备份
+os.environ.setdefault("AGENT_TRASH_DIR", os.path.join(_TMP_DIR, "trash"))
 
 import pytest  # noqa: E402
 

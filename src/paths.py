@@ -53,7 +53,10 @@ DATA_DIR = get_data_dir()
 # 允许用环境变量把数据库指到别处（测试用独立临时库，避免污染真实数据）
 DB_PATH = os.environ.get("AGENT_DB_PATH") or os.path.join(DATA_DIR, "chat.db")
 CHROMA_DIR = os.path.join(DATA_DIR, "chroma_db")
-TRASH_DIR = os.path.join(DATA_DIR, ".trash")
+# 回收站。支持环境变量覆盖 —— **测试与评估必须隔离它**：
+# 光隔离 AGENT_DB_PATH 是不够的，跑一批任务会往真实回收站里塞几百份备份
+# （agent-code 自己就踩过这个坑，往 data/.trash 留了 122 条测试残留）。
+TRASH_DIR = os.environ.get("AGENT_TRASH_DIR") or os.path.join(DATA_DIR, ".trash")
 BACKUP_DIR = os.path.join(DATA_DIR, ".backup")
 WEBVIEW_DATA_DIR = os.path.join(DATA_DIR, ".webview_data")
 
