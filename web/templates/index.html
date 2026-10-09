@@ -3555,6 +3555,212 @@
         // ============ 确认后续跑 Agent ============
         // 用户点 ✓ 后调用：带 resume:true 重新请求 /run，复用后端 pending state，
         // 执行被确认的工具，并从原 step 继续跑完剩余步骤（含链式确认）。
+        // ============ 统一的 SSE 事件处理 ============
+        //
+        // **为什么要有这一段**：runTask（首次运行）和 resumeRun（续跑）原本各自
+        // 复制了一份完全一样的事件分支。复制带来的代价不是「代码多」，而是
+        // **只往其中一份加处理器，另一份就静默漏掉这个事件**。
+        //
+        // 真实事故：上下文压缩指示、项目约定提示、权限拒绝卡片、轮次事件
+        // 全都只加在了 resumeRun 那一份 —— 主路径下这些 UI 一个都不显示，
+        // 而且单元测试和 CDP 都没发现（CDP 当时用合成事件直接调渲染函数，
+        // 绕过了真实的事件分发）。
+        //
+        // 现在只有一份：任何事件处理都改这里，两条路径同时生效。
+
+        /**
+         * 处理单条 SSE 事件。
+         *
+         * @param {object} run 本次运行的上下文（由调用方构造，见 makeRunContext）
+         * @param {object} ev  后端发来的事件
+         */
+        function handleSseEvent(run, ev) {
+            const st = sessionStates[run.sessionId];
+            if (st && !st.execHistory) st.execHistory = [];
+
+            // ---- 第一步：先写内存。不论用户当前停在哪个会话，都要留痕 ----
+            if (ev.type === "text") {
+                run.fullText += ev.content;
+                if (st) st.fullText = run.fullText;
+            } else if (ev.type === "plan_update") {
+                if (st) st.plan = ev.plan;
+            } else if (ev.type === "tool_call" || ev.type === "tool_result"
+                       || ev.type === "phase" || ev.type === "plan_from_planner") {
+                if (st) st.execHistory.push(ev);
+            }
+
+            // ---- 第二步：用户不在本会话 → 只留内存，不碰 DOM ----
+            if (!run.isActive()) {
+                if (ev.type === "confirm_write" || ev.type === "confirm_delete"
+                    || ev.type === "confirm_command") {
+                    if (st) st.pendingConfirm = ev;
+                }
+                return;
+            }
+
+            // ---- 第三步：在本会话 → 更新界面 ----
+            const ctx = run.ctx;
+            if (ev.type === "text") {
+                ctx.bubble.innerHTML = DOMPurify.sanitize(marked.parse(run.fullText));
+                chat.scrollTop = chat.scrollHeight;
+
+            } else if (ev.type === "token_usage") {
+                ctx.tokenInfo.innerHTML =
+                    `⚡ <span class="token-num">${ev.total_tokens}</span> tokens ` +
+                    `(输入 ${ev.prompt_tokens} · 输出 ${ev.completion_tokens} · ${ev.steps} 步)`;
+                ctx.details.style.display = "block";
+
+            } else if (ev.type === "phase") {
+                // 多 Agent 阶段卡片（单 Agent 不会发这个事件）
+                if (ev.status === "doing") createPhaseCard(ctx, ev.name);
+                else updatePhaseStatus(ctx, ev.name, ev.status);
+
+            } else if (ev.type === "plan_from_planner") {
+                const card = ctx.bubble.parentElement
+                    .querySelector(".phase-card:last-of-type .phase-body");
+                if (card) {
+                    const steps = (ev.plan && ev.plan.steps) || [];
+                    card.innerHTML = `
+                        <div style="font-weight:600;margin-bottom:6px;">📋 任务计划</div>
+                        <div class="planner-steps">
+                            ${steps.map((x, i) => `<div class="planner-step">${i + 1}. ${escapeHtml(x)}</div>`).join("")}
+                        </div>`;
+                }
+
+            } else if (ev.type === "review_result") {
+                const card = ctx.bubble.parentElement
+                    .querySelector(".phase-card:last-of-type .phase-body");
+                if (card) {
+                    const r = ev.result || {};
+                    const passedClass = r.passed === true ? "review-passed"
+                        : (r.passed === false ? "review-failed" : "review-unknown");
+                    const passedText = r.passed === true ? "✅ 通过"
+                        : (r.passed === false ? "❌ 未通过" : "⚠️ 审查未完成");
+                    const suggestions = (r.suggestions || [])
+                        .map(x => `<li>${escapeHtml(x)}</li>`).join("");
+                    card.innerHTML = `
+                        <div class="${passedClass}">${passedText}</div>
+                        <div class="review-reason">${escapeHtml(r.reason || "")}</div>
+                        ${suggestions ? `<ul class="review-suggestions">${suggestions}</ul>` : ""}`;
+                }
+
+            } else if (ev.type === "tool_call") {
+                run.lastResultEl = appendToolCall(ctx, ev.name, ev.args);
+                // 记下本次碰过的文件 → 流式期间显示临时芯片
+                collectProduced(ctx, ev.name, ev.args);
+
+            } else if (ev.type === "tool_result") {
+                if (run.lastResultEl) {
+                    updateToolResult(run.lastResultEl, ev.content);
+                } else {
+                    // 续跑时后端只回 tool_result（tool_call 上一轮已渲染）
+                    const items = ctx.execList.querySelectorAll(".tool-result");
+                    if (items.length > 0) {
+                        items[items.length - 1].textContent = "📋 " + ev.content;
+                    }
+                }
+
+            } else if (ev.type === "run_started") {
+                ctx.runIndex = ev.run_index;
+
+            } else if (ev.type === "context_stats") {
+                updateContextStats(ctx, ev);
+
+            } else if (ev.type === "project_context") {
+                appendProjectContextNote(ctx, ev);
+
+            } else if (ev.type === "permission_denied") {
+                appendPermissionDenied(ctx, ev.content);
+
+            } else if (ev.type === "confirm_delete") {
+                ctx.confirmToken = ev.confirm_token;   // 记住一次性令牌，确认时回传
+                showDeleteConfirm(ctx, ev.path, run.task || "");
+
+            } else if (ev.type === "confirm_write") {
+                ctx.confirmToken = ev.confirm_token;
+                showWriteConfirm(ctx, ev.path, ev.old_content, ev.new_content);
+
+            } else if (ev.type === "confirm_command") {
+                ctx.confirmToken = ev.confirm_token;
+                showCommandConfirm(ctx, ev.cmd);
+
+            } else if (ev.type === "plan_update") {
+                renderPlan(ev.plan);
+
+            } else if (ev.type === "cancelled") {
+                // 停止：保留已产出的文本，并明确标注是用户主动中断
+                ctx.bubble.innerHTML = DOMPurify.sanitize(marked.parse(run.fullText));
+                const stopTip = document.createElement("div");
+                stopTip.className = "bubble";
+                stopTip.style.cssText = "background:#fef3c7;color:#92400e;margin-top:6px;";
+                stopTip.textContent = run.fullText
+                    ? "⏹ 已停止本次任务，上方为中断前已产出的内容"
+                    : "⏹ 已停止本次任务";
+                ctx.bubble.parentElement.appendChild(stopTip);
+                // 服务端已把断点存进 pending_state，这里给一个「继续」入口
+                const contBtn = document.createElement("button");
+                contBtn.className = "trash-btn restore";
+                contBtn.style.marginTop = "6px";
+                contBtn.textContent = "▶ 从这里继续";
+                contBtn.onclick = () => {
+                    contBtn.remove();
+                    stopTip.textContent = "▶ 正在从中断处继续…";
+                    ctx.confirmToken = null;   // 中断续跑不需要确认令牌
+                    resumeRun(ctx);
+                };
+                ctx.bubble.parentElement.appendChild(contBtn);
+
+            } else if (ev.type === "error") {
+                ctx.bubble.style.color = "#b91c1c";
+                ctx.bubble.textContent = "⚠️ " + ev.content;
+
+            } else if (ev.type === "done") {
+                finishRoundCard(ctx, run.sessionId);
+            }
+        }
+
+        /**
+         * 读取并分发整个 SSE 流。
+         *
+         * ⚠️ 注意这里的 catch **必须打日志**。原来是空的 `catch (e) { }`，
+         * 结果 resumeRun 里 `finishRoundCard(ctx, mySessionId)` 这个
+         * ReferenceError（resumeRun 根本没有 mySessionId）被静默吞掉，
+         * 表现为「续跑后轮次卡片不出现」，查起来全靠猜。
+         */
+        async function consumeSseStream(res, run) {
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+            let buffer = "";
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const parts = buffer.split("\n\n");
+                buffer = parts.pop();
+                for (const part of parts) {
+                    if (!part.startsWith("data: ")) continue;
+                    try {
+                        handleSseEvent(run, JSON.parse(part.slice(6).trim()));
+                    } catch (e) {
+                        // 绝不静默：这里藏过一次真 bug
+                        console.error("[SSE] 事件处理失败", e);
+                    }
+                }
+            }
+        }
+
+        /** 构造一次运行的上下文，供 consumeSseStream 用。 */
+        function makeRunContext(sessionId, ctx, task) {
+            return {
+                sessionId,
+                ctx,
+                task: task || "",
+                fullText: (sessionStates[sessionId] || {}).fullText || "",
+                lastResultEl: null,
+                isActive: () => currentSessionId === sessionId,
+            };
+        }
+
         async function resumeRun(ctx) {
             const sessionId = (ctx.sessionId != null) ? ctx.sessionId : currentSessionId;
             const isActive = () => (currentSessionId === sessionId);
@@ -3566,7 +3772,6 @@
             updateRunControls();
 
             let fullText = st.fullText || "";
-            let lastResultEl = null;
 
             try {
                 const body = {
@@ -3598,112 +3803,9 @@
                     body: JSON.stringify(body)
                 });
 
-                const reader = res.body.getReader();
-                const decoder = new TextDecoder("utf-8");
-                let buffer = "";
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    buffer += decoder.decode(value, { stream: true });
-                    const parts = buffer.split("\n\n");
-                    buffer = parts.pop();
-                    for (const part of parts) {
-                        if (!part.startsWith("data: ")) continue;
-                        const data = part.slice(6).trim();
-                        try {
-                            const ev = JSON.parse(data);
-                            if (!st.execHistory) st.execHistory = [];
-                            if (ev.type === "text") {
-                                fullText += ev.content;
-                                st.fullText = fullText;
-                            } else if (ev.type === "plan_update") {
-                                st.plan = ev.plan;
-                            } else if (ev.type === "tool_call" || ev.type === "tool_result") {
-                                st.execHistory.push(ev);
-                            }
-
-                            // 未停留本会话：只存内存，切回时补渲染
-                            if (!isActive()) {
-                                if (ev.type === "confirm_write" || ev.type === "confirm_delete" || ev.type === "confirm_command") {
-                                    st.pendingConfirm = ev;
-                                }
-                                continue;
-                            }
-
-                            if (ev.type === "text") {
-                                ctx.bubble.innerHTML = DOMPurify.sanitize(marked.parse(fullText));
-                                chat.scrollTop = chat.scrollHeight;
-                            } else if (ev.type === "token_usage") {
-                                ctx.tokenInfo.innerHTML =
-                                    `⚡ <span class="token-num">${ev.total_tokens}</span> tokens ` +
-                                    `(输入 ${ev.prompt_tokens} · 输出 ${ev.completion_tokens} · ${ev.steps} 步)`;
-                                ctx.details.style.display = "block";
-                            } else if (ev.type === "tool_call") {
-                                lastResultEl = appendToolCall(ctx, ev.name, ev.args);
-                                // 记下本次会写盘的文件，跑完给「下载 / 打开」入口
-                                collectProduced(ctx, ev.name, ev.args);
-                            } else if (ev.type === "run_started") {
-                                ctx.runIndex = ev.run_index;
-                            } else if (ev.type === "context_stats") {
-                                updateContextStats(ctx, ev);
-                            } else if (ev.type === "project_context") {
-                                appendProjectContextNote(ctx, ev);
-                            } else if (ev.type === "permission_denied") {
-                                appendPermissionDenied(ctx, ev.content);
-                            } else if (ev.type === "tool_result") {
-                                if (lastResultEl) {
-                                    updateToolResult(lastResultEl, ev.content);
-                                } else {
-                                    // 续跑时后端只回 tool_result（tool_call 上一轮已渲染）
-                                    const items = ctx.execList.querySelectorAll(".tool-result");
-                                    if (items.length > 0) {
-                                        items[items.length - 1].textContent = "📋 " + ev.content;
-                                    }
-                                }
-                            } else if (ev.type === "confirm_delete") {
-                                ctx.confirmToken = ev.confirm_token;
-                                showDeleteConfirm(ctx, ev.path, "");
-                            } else if (ev.type === "confirm_write") {
-                                ctx.confirmToken = ev.confirm_token;
-                                showWriteConfirm(ctx, ev.path, ev.old_content, ev.new_content);
-                            } else if (ev.type === "confirm_command") {
-                                ctx.confirmToken = ev.confirm_token;
-                                showCommandConfirm(ctx, ev.cmd);
-                            } else if (ev.type === "plan_update") {
-                                renderPlan(ev.plan);
-                            } else if (ev.type === "cancelled") {
-                                // 停止：保留已产出的文本，并明确标注是用户主动中断
-                                ctx.bubble.innerHTML = DOMPurify.sanitize(marked.parse(fullText));
-                                const stopTip = document.createElement("div");
-                                stopTip.className = "bubble";
-                                stopTip.style.cssText = "background:#fef3c7;color:#92400e;margin-top:6px;";
-                                stopTip.textContent = fullText
-                                    ? "⏹ 已停止本次任务，上方为中断前已产出的内容"
-                                    : "⏹ 已停止本次任务";
-                                ctx.bubble.parentElement.appendChild(stopTip);
-                                // 服务端已把断点存进 pending_state，这里给一个「继续」入口
-                                const contBtn = document.createElement("button");
-                                contBtn.className = "trash-btn restore";
-                                contBtn.style.marginTop = "6px";
-                                contBtn.textContent = "▶ 从这里继续";
-                                contBtn.onclick = () => {
-                                    contBtn.remove();
-                                    stopTip.textContent = "▶ 正在从中断处继续…";
-                                    ctx.confirmToken = null;   // 中断续跑不需要确认令牌
-                                    resumeRun(ctx);
-                                };
-                                ctx.bubble.parentElement.appendChild(contBtn);
-                            } else if (ev.type === "error") {
-                                ctx.bubble.style.color = "#b91c1c";
-                                ctx.bubble.textContent = "⚠️ " + ev.content;
-                            } else if (ev.type === "done") {
-                                ctx.details.open = false;
-                                finishRoundCard(ctx, mySessionId);
-                            }
-                        } catch (e) { }
-                    }
-                }
+                const run = makeRunContext(sessionId, ctx, null);
+                await consumeSseStream(res, run);
+                fullText = run.fullText;
 
                 if (isActive()) {
                     ctx.bubble.innerHTML = DOMPurify.sanitize(marked.parse(fullText));
@@ -6610,8 +6712,7 @@
             const ctx = addAssistantMessage();
             sessionStates[mySessionId].ctx = ctx;   // 供切回本会话时重新挂载实时输出
             ctx.sessionId = mySessionId;            // 标注 ctx 归属，供确认操作判断"用户是否仍停留在本会话"
-            let fullText = "";
-            let lastResultEl = null;
+            let fullText = "";   // 实际来源是 run.fullText，循环结束后回填
 
             try {
                 const url = multiAgentMode ? "/run_multi" : "/run";
@@ -6643,146 +6744,9 @@
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(body)
                 });
-                const reader = res.body.getReader();
-                const decoder = new TextDecoder("utf-8");
-                let buffer = "";
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-
-                    buffer += decoder.decode(value, { stream: true });
-                    const parts = buffer.split("\n\n");
-                    buffer = parts.pop();
-
-                    for (const part of parts) {
-                        if (!part.startsWith("data: ")) continue;
-                        const data = part.slice(6).trim();
-                        try {
-                            const ev = JSON.parse(data);
-                            console.log("[SSE]", ev.type, ev);
-                            // ✅ 先记录到内存：不论当前停留在哪个会话，都要留痕
-                            if (!sessionStates[mySessionId].execHistory) sessionStates[mySessionId].execHistory = [];
-                            if (ev.type === "text") {
-                                fullText += ev.content;
-                                sessionStates[mySessionId].fullText = fullText;
-                            } else if (ev.type === "plan_update") {
-                                sessionStates[mySessionId].plan = ev.plan;
-                            } else if (ev.type === "tool_call" || ev.type === "tool_result" || ev.type === "phase" || ev.type === "plan_from_planner") {
-                                // 缺口 2 修复：执行类事件留在内存，切回本会话时按序重绘
-                                sessionStates[mySessionId].execHistory.push(ev);
-                            }
-                            // ✅ 只有仍停留在本会话时才写 DOM；否则只更新内存，不干扰当前会话
-                            const isActive = (currentSessionId === mySessionId);
-                            if (!isActive) {
-                                // 保存 confirm_* 事件到 sessionStates，切回时补渲染
-                                if (ev.type === "confirm_write" || ev.type === "confirm_delete" || ev.type === "confirm_command") {
-                                    if (sessionStates[mySessionId]) {
-                                        sessionStates[mySessionId].pendingConfirm = ev;
-                                    }
-                                }
-                                continue;
-                            }
-                            if (ev.type === "text") {
-                                ctx.bubble.innerHTML = DOMPurify.sanitize(marked.parse(fullText));
-                                chat.scrollTop = chat.scrollHeight;
-                            } else if (ev.type === "token_usage") {
-                                console.log("[TOKEN]", ev, "el=", ctx.tokenInfo);
-                                ctx.tokenInfo.innerHTML =
-                                    `⚡ <span class="token-num">${ev.total_tokens}</span> tokens ` +
-                                    `(输入 ${ev.prompt_tokens} · 输出 ${ev.completion_tokens} · ${ev.steps} 步)`;
-                                ctx.details.style.display = "block";
-                            } else if (ev.type === "phase") {
-                                if (ev.status === "doing") {
-                                    createPhaseCard(ctx, ev.name);
-                                } else {
-                                    updatePhaseStatus(ctx, ev.name, ev.status);
-                                }
-                            } else if (ev.type === "run_started") {
-                                // 「第 N 轮」—— 轮次卡片要用
-                                ctx.runIndex = ev.run_index;
-                            } else if (ev.type === "context_stats") {
-                                updateContextStats(ctx, ev);
-                            } else if (ev.type === "project_context") {
-                                appendProjectContextNote(ctx, ev);
-                            } else if (ev.type === "permission_denied") {
-                                appendPermissionDenied(ctx, ev.content);
-                            } else if (ev.type === "plan_from_planner") {
-                                const card = ctx.bubble.parentElement.querySelector(".phase-card:last-of-type .phase-body");
-                                if (card) {
-                                    const steps = ev.plan.steps || [];
-                                    card.innerHTML = `
-                                        <div style="font-weight:600;margin-bottom:6px;">📋 任务计划</div>
-                                        <div class="planner-steps">
-                                            ${steps.map((s, i) => `<div class="planner-step">${i + 1}. ${escapeHtml(s)}</div>`).join("")}
-                                        </div>
-                                    `;
-                                }
-                            } else if (ev.type === "review_result") {
-                                const card = ctx.bubble.parentElement.querySelector(".phase-card:last-of-type .phase-body");
-                                if (card) {
-                                    const r = ev.result || {};
-                                    const passedClass = r.passed === true
-                                        ? "review-passed"
-                                        : (r.passed === false ? "review-failed" : "review-unknown");
-                                    const passedText = r.passed === true
-                                        ? "✅ 通过"
-                                        : (r.passed === false ? "❌ 未通过" : "⚠️ 审查未完成");
-                                    const suggestions = (r.suggestions || []).map(s => `<li>${escapeHtml(s)}</li>`).join("");
-                                    card.innerHTML = `
-                                        <div class="${passedClass}">${passedText}</div>
-                                        <div class="review-reason">${escapeHtml(r.reason || "")}</div>
-                                        ${suggestions ? `<ul class="review-suggestions">${suggestions}</ul>` : ""}
-                                    `;
-                                }
-                            } else if (ev.type === "confirm_delete") {
-                                // 显示确认按钮
-                                ctx.confirmToken = ev.confirm_token;   // 记住一次性令牌，确认时回传
-                                showDeleteConfirm(ctx, ev.path, task);
-                            } else if (ev.type === "confirm_write") {
-                                ctx.confirmToken = ev.confirm_token;
-                                showWriteConfirm(ctx, ev.path, ev.old_content, ev.new_content);
-                            } else if (ev.type === "confirm_command") {
-                                ctx.confirmToken = ev.confirm_token;
-                                showCommandConfirm(ctx, ev.cmd);
-                            } else if (ev.type === "plan_update") {
-                                renderPlan(ev.plan);
-                            } else if (ev.type === "tool_call") {
-                                lastResultEl = appendToolCall(ctx, ev.name, ev.args);
-                            } else if (ev.type === "tool_result") {
-                                if (lastResultEl) updateToolResult(lastResultEl, ev.content);
-                            } else if (ev.type === "cancelled") {
-                                // 停止：保留已产出的文本，并明确标注是用户主动中断
-                                ctx.bubble.innerHTML = DOMPurify.sanitize(marked.parse(fullText));
-                                const stopTip = document.createElement("div");
-                                stopTip.className = "bubble";
-                                stopTip.style.cssText = "background:#fef3c7;color:#92400e;margin-top:6px;";
-                                stopTip.textContent = fullText
-                                    ? "⏹ 已停止本次任务，上方为中断前已产出的内容"
-                                    : "⏹ 已停止本次任务";
-                                ctx.bubble.parentElement.appendChild(stopTip);
-                                // 服务端已把断点存进 pending_state，这里给一个「继续」入口
-                                const contBtn = document.createElement("button");
-                                contBtn.className = "trash-btn restore";
-                                contBtn.style.marginTop = "6px";
-                                contBtn.textContent = "▶ 从这里继续";
-                                contBtn.onclick = () => {
-                                    contBtn.remove();
-                                    stopTip.textContent = "▶ 正在从中断处继续…";
-                                    ctx.confirmToken = null;   // 中断续跑不需要确认令牌
-                                    resumeRun(ctx);
-                                };
-                                ctx.bubble.parentElement.appendChild(contBtn);
-                            } else if (ev.type === "error") {
-                                ctx.bubble.style.color = "#b91c1c";
-                                ctx.bubble.textContent = "⚠️ " + ev.content;
-                            } else if (ev.type === "done") {
-                                // 替换流式期间的临时芯片为「第 N 轮改动」卡片
-                                finishRoundCard(ctx, mySessionId);
-                            }
-                        } catch (e) { }
-                    }
-                }
+                const run = makeRunContext(mySessionId, ctx, task);
+                await consumeSseStream(res, run);
+                fullText = run.fullText;   // 流结束后要重新渲染，用统一的这份
                 // 流结束后，重新渲染 + 高亮（仅当仍停留在本会话时才写 DOM）
                 if (currentSessionId === mySessionId) {
                     ctx.bubble.innerHTML = DOMPurify.sanitize(marked.parse(fullText));

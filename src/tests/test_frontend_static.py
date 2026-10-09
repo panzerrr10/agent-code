@@ -154,16 +154,17 @@ def _loosely_defined(js: str, name: str) -> bool:
     return any(re.search(p, js) for p in patterns)
 
 
-# ============ SSE 事件处理的对称性 ============
+# ============ SSE 事件处理只有一份 ============
 
-# 前端有**两套** SSE 消费循环：runTask（首次运行）和 resumeRun（续跑）。
-# 它们各自维护一份事件分支 —— 这是一个已知的重复，而重复的代价是：
-# **只往其中一份加处理器，另一份就静默漏掉这个事件。**
+# 前端曾经有**两套** SSE 消费循环：runTask（首次运行）和 resumeRun（续跑）。
+# 复制带来的代价不是「代码多」，而是**只往其中一份加处理器，另一份就静默漏掉事件**。
 #
-# 真实事故：上下文压缩的 context_stats、项目约定的 project_context、
-# 权限拒绝的 permission_denied、轮次的 run_started **全都只加在了 resumeRun 那份**，
-# 于是主路径下这些 UI 一个都不显示 —— 而且单元测试和 CDP 都没发现
-# （CDP 当时是用合成事件直接调渲染函数验证的，绕过了真实的事件分发）。
+# 真实事故：上下文压缩指示（context_stats）、项目约定提示（project_context）、
+# 权限拒绝卡片（permission_denied）、轮次事件（run_started）**全都只加在了
+# resumeRun 那一份** —— 主路径下这些 UI 一个都不显示，而且单元测试和当时的
+# CDP 验证都没发现（CDP 是用合成事件直接调渲染函数，绕过了真实的事件分发）。
+#
+# 现在两边共用 handleSseEvent / consumeSseStream，这组测试守住这个结构。
 CORE_EVENTS = [
     "run_started",        # 第 N 轮
     "text",
@@ -182,6 +183,9 @@ CORE_EVENTS = [
     "done",
 ]
 
+# 多 Agent 专属事件（单 Agent 不会发，但共享处理器也认）
+MULTI_AGENT_EVENTS = ["phase", "plan_from_planner", "review_result"]
+
 
 def _function_body(js: str, signature: str) -> str:
     """取出一个顶层函数的完整函数体（按缩进找配对的结束大括号）。"""
@@ -198,35 +202,51 @@ def _function_body(js: str, signature: str) -> str:
     raise AssertionError(f"{signature} 的括号不配对")
 
 
-def test_both_sse_loops_handle_the_same_core_events():
-    """runTask 与 resumeRun 必须处理**同一套**核心事件。
+def test_only_one_sse_consumer_exists():
+    """**SSE 只能有一个消费点。**
 
-    这个测试拦的是「复制两份代码、只改一份」这类问题 ——
-    它的症状是「某个功能只在特定路径下生效」，极难在手工测试中发现。
-    """
-    js = _inline_js()
-    run_task = _function_body(js, "async function runTask(")
-    resume = _function_body(js, "async function resumeRun(")
-
-    missing_in_run = [e for e in CORE_EVENTS if f'ev.type === "{e}"' not in run_task]
-    missing_in_resume = [e for e in CORE_EVENTS if f'ev.type === "{e}"' not in resume]
-
-    assert not missing_in_run, (
-        f"runTask（主路径）没有处理这些事件：{missing_in_run}\n"
-        "它们很可能只加在了 resumeRun 那份循环里 —— 主路径下对应 UI 不会出现。"
-    )
-    assert not missing_in_resume, f"resumeRun（续跑路径）没有处理这些事件：{missing_in_resume}"
-
-
-def test_no_duplicate_sse_loop_is_a_known_risk():
-    """两套循环本身就是风险，这里记录当前状态：确实是两套。
-
-    如果将来合并成一套，这个测试会失败 —— 那是**好事**，
-    把 CORE_EVENTS 那份对称性检查一起删掉即可。
+    这条是这次合并的核心保障：如果将来又有人复制出第二份，
+    这个测试会失败，提醒他「加事件处理要改共享函数，不要复制」。
     """
     js = _inline_js()
     readers = js.count("res.body.getReader()")
-    assert readers == 2, (
-        f"前端有 {readers} 处 SSE 消费点（预期 2：runTask 与 resumeRun）。"
-        "如果合并成了一处，请一并清理 CORE_EVENTS 对称性测试。"
+    assert readers == 1, (
+        f"发现 {readers} 处 SSE 消费点（应当只有 consumeSseStream 里那 1 处）。"
+        "又复制了一份循环？请改 handleSseEvent，不要复制。"
     )
+
+
+def test_both_run_paths_use_the_shared_consumer():
+    """首次运行与续跑必须都走同一个消费函数。"""
+    js = _inline_js()
+    for sig in ("async function runTask(", "async function resumeRun("):
+        body = _function_body(js, sig)
+        assert "consumeSseStream(" in body, f"{sig} 没有使用共享的 SSE 消费者"
+        assert "handleSseEvent(" not in body, f"{sig} 里又出现了自己的事件分发"
+
+
+def test_shared_handler_covers_all_core_events():
+    """共享处理器必须覆盖全部核心事件。
+
+    之前就是「事件分支散在两份循环里」，只补了一份 —— 这个测试直接盯住覆盖面。
+    """
+    js = _inline_js()
+    handler = _function_body(js, "function handleSseEvent(")
+    missing = [e for e in CORE_EVENTS if f'ev.type === "{e}"' not in handler]
+    assert not missing, f"共享处理器漏了这些核心事件：{missing}"
+    missing_ma = [e for e in MULTI_AGENT_EVENTS if f'ev.type === "{e}"' not in handler]
+    assert not missing_ma, f"共享处理器漏了这些多 Agent 事件：{missing_ma}"
+
+
+def test_sse_errors_are_not_silently_swallowed():
+    """SSE 事件处理的异常**必须打日志**。
+
+    原来是空的 `catch (e) { }`。后果：resumeRun 里
+    `finishRoundCard(ctx, mySessionId)` 的 ReferenceError（那个函数里根本没有
+    mySessionId）被静默吞掉，表现为「续跑后轮次卡片不出现」——查起来全靠猜。
+    """
+    js = _inline_js()
+    consumer = _function_body(js, "async function consumeSseStream(")
+    assert "catch" in consumer, "consumeSseStream 应当捕获事件处理异常"
+    assert "console.error" in consumer or "console.warn" in consumer, \
+        "捕获了却什么都不打 —— 这正是上次藏住 ReferenceError 的原因"
