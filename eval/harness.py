@@ -107,12 +107,20 @@ def check_task(task, workdir: str) -> tuple[bool, str]:
 
 
 def run_task(task, *, provider_id=None, model=None, api_key=None, base_url=None,
-             keep: bool = False, verbose: bool = False) -> dict:
-    """跑一个任务并返回结果 dict。"""
+             keep: bool = False, verbose: bool = False, budget: int = None) -> dict:
+    """跑一个任务并返回结果 dict。
+
+    ``budget``：覆盖上下文预算。**把预算调小是唯一能可靠验证压缩路径的办法** ——
+    正常任务里 agent 会用 search_files / multi_edit 抄近路，上下文根本涨不起来
+    （实测 17 条任务、从易到难，compactions 全是 0）。
+    """
     isolate_env()
     import agent  # noqa: PLC0415
     import db  # noqa: PLC0415
     import runtime  # noqa: PLC0415
+
+    if budget:
+        agent.CONTEXT_BUDGET_TOKENS = int(budget)
 
     db.init_db()
     base = tempfile.mkdtemp(prefix="evalrun-", dir=os.path.expanduser("~"))

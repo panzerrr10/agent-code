@@ -1,0 +1,54 @@
+{
+  "summary": {
+    "tasks": 2,
+    "passed": 1,
+    "pass_rate": 0.5,
+    "total_steps": 96,
+    "avg_steps": 48.0,
+    "total_tokens": 595592,
+    "total_tool_calls": 166,
+    "total_duration_s": 124.8,
+    "compactions": 91
+  },
+  "results": [
+    {
+      "task": "cascade_root_cause",
+      "title": "找出根因而不是逐个打补丁",
+      "tags": [
+        "hard",
+        "root-cause"
+      ],
+      "passed": false,
+      "reason": "验收失败（退出码 1）：Traceback (most recent call last):\n  File \"/home/pz/evalrun-32nh_cjc/task-cascade_root_cause-mrwkk4hq/check.py\", line 9, in <module>\n    assert f3() == 12, f3()\n           ^^^^^^^^^^\nAssertionError: 12.56",
+      "steps": 50,
+      "prompt_tokens": 317478,
+      "completion_tokens": 6729,
+      "duration_s": 72.1,
+      "tool_calls": 98,
+      "compactions": 47,
+      "error": "",
+      "workdir": "",
+      "diff_stat": ""
+    },
+    {
+      "task": "many_small_fixes",
+      "title": "连续修 12 个独立的小 bug",
+      "tags": [
+        "hard",
+        "persistence",
+        "context-pressure"
+      ],
+      "passed": true,
+      "reason": "通过",
+      "steps": 46,
+      "prompt_tokens": 266567,
+      "completion_tokens": 4818,
+      "duration_s": 52.7,
+      "tool_calls": 68,
+      "compactions": 44,
+      "error": "",
+      "workdir": "",
+      "diff_stat": " 12 files changed, 12 insertions(+), 12 deletions(-)"
+    }
+  ]
+}

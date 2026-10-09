@@ -120,6 +120,9 @@ def main():
     ap.add_argument("--out", help="结果写入的 JSON 路径")
     ap.add_argument("--baseline", help="基线 JSON，跑完自动对比")
     ap.add_argument("--keep", action="store_true", help="保留任务工作目录，便于复盘")
+    ap.add_argument("--budget", type=int,
+                    help="覆盖上下文预算（tokens）。调小可以强制触发压缩，"
+                         "用来验证压缩路径不会把真实任务搞坏")
     ap.add_argument("-v", "--verbose", action="store_true", help="打印每一步")
     ap.add_argument("--list", action="store_true", help="只列出任务")
     args = ap.parse_args()
@@ -154,6 +157,7 @@ def main():
         base_url=url,
         keep=args.keep,
         verbose=args.verbose,
+        budget=args.budget,
     )
 
     s = payload["summary"]

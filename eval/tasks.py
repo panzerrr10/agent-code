@@ -358,6 +358,338 @@ ALL_TASKS: list[Task] = [
 ]
 
 
+
+# ============ 难题：用来提高区分度 ============
+#
+# 前面 10 条都是 5~8 步就能做完的单点任务，模型全过 —— 满分等于没有区分度。
+# 这一批刻意加难，目标是：
+#   1. 步数明显更高（需要探索、需要多轮验证）
+#   2. 有「看起来对但边界错」的陷阱
+#   3. 至少一条能**触发上下文压缩**（现在 10 条全是 compactions=0，压缩路径根本没被覆盖）
+
+
+def _big_module(name: str, n_funcs: int, bug_at: int, bug_kind: str) -> str:
+    """生成一个大模块（几百行），其中某一个函数有 bug。
+
+    为什么用生成而不是手写：几百行的字面量会让 tasks.py 没法读，
+    而生成出来的结构和真实代码一样（大量相似函数 = 真正的「大海捞针」）。
+    """
+    parts = [f'"""自动生成的模块 {name}：一组相似的工具函数。"""', "", "import math", ""]
+    for i in range(n_funcs):
+        parts.append(f"def op_{name}_{i}(x, y=1):")
+        parts.append(f'    """第 {i} 号运算：把 x 和 y 做一些变换。"""')
+        if i == bug_at:
+            if bug_kind == "sign":
+                parts.append("    return abs(x) - abs(y)      # 这里应该是加")
+            elif bug_kind == "offbyone":
+                parts.append("    return x * (y + 1)          # 这里不应该 +1")
+            else:
+                parts.append("    return x / y if y else 0    # 这里应该返回 x")
+        else:
+            parts.append("    return abs(x) + abs(y)")
+        # 掺一些无害的注释，让文件更接近真实体量
+        parts.append(f"    # 备注：op_{name}_{i} 在 v1 中行为不变")
+        parts.append("")
+    return "\n".join(parts) + "\n"
+
+
+# 大海捞针：6 个文件、每个约 90 个函数，合计几千行。
+# 必须真的读进去才能定位（bug 是纯逻辑错误，grep 关键词找不到）。
+_HAYSTACK_BUG_FILE = "mod_d.py"      # 注意要带 .py —— 少写一次就会一个 bug 都植入不进去
+_HAYSTACK_BUG_AT = 37
+_HAYSTACK_FILES = {
+    f"mod_{c}.py": _big_module(c, 90, _HAYSTACK_BUG_AT if f"mod_{c}.py" == _HAYSTACK_BUG_FILE else -1,
+                               "sign")
+    for c in "abcdef"
+}
+_HAYSTACK_FILES["check.py"] = (
+    "import importlib\n"
+    "\n"
+    "bad = 0\n"
+    "for c in 'abcdef':\n"
+    "    m = importlib.import_module(f'mod_{c}')\n"
+    "    for i in range(90):\n"
+    "        if getattr(m, f'op_{c}_{i}')(-3, 2) != 5:\n"
+    "            bad += 1\n"
+    "assert bad == 0, f'有 {bad} 个函数的计算结果不对（自己找出来是哪几个）'\n"
+    'print("ok")\n'
+)
+
+
+HARD_TASKS = [
+    Task(
+        id="spec_edge_cases",
+        title="按规格实现（含多个边界）",
+        prompt=(
+            "duration.py 里的 parse_duration 还没实现。"
+            "请严格按文档字符串里的规格实现，让 check.py 通过。"
+        ),
+        files={
+            "duration.py": (
+                "def parse_duration(text):\n"
+                '    """把形如 \'1h30m\' / \'45s\' / \'2d\' 的时长解析成秒数。\n'
+                "\n"
+                "    规格：\n"
+                "      - 单位有 s / m / h / d，分别表示 秒/分/时/天\n"
+                "      - 可以任意顺序、任意组合、可重复（'1m1m' == 120）\n"
+                "      - 允许数字与单位之间有空格（'1 h 30 m'）\n"
+                "      - 数字可以是多位（'90m' == 5400）\n"
+                "      - **纯数字（没有单位）视为秒**（'90' == 90）\n"
+                "      - 空字符串 / 全是空白 → 抛 ValueError\n"
+                "      - 出现未知单位、或数字后面缺单位但又不是纯数字 → 抛 ValueError\n"
+                "      - **负数 → 抛 ValueError**\n"
+                '    """\n'
+                "    raise NotImplementedError\n"
+            ),
+            "check.py": (
+                "from duration import parse_duration\n"
+                "\n"
+                "cases = {\n"
+                "    '45s': 45, '90': 90, '1m': 60, '1h': 3600, '2d': 172800,\n"
+                "    '1h30m': 5400, '1m1m': 120, '1 h 30 m': 5400, '90m': 5400,\n"
+                "    '1d2h3m4s': 86400 + 7200 + 180 + 4, '  10s  ': 10,\n"
+                "}\n"
+                "for text, want in cases.items():\n"
+                "    got = parse_duration(text)\n"
+                "    assert got == want, f'{text!r} -> {got}，应为 {want}'\n"
+                "\n"
+                "for bad in ['', '   ', 'abc', '1x', '1h-2m', '-5', '-1h', 'h', '1h 2']:\n"
+                "    try:\n"
+                "        parse_duration(bad)\n"
+                "    except ValueError:\n"
+                "        continue\n"
+                "    raise AssertionError(f'{bad!r} 应当抛 ValueError')\n"
+                'print("ok")\n'
+            ),
+        },
+        check_cmd="python3 check.py",
+        tags=["hard", "spec-precision", "edge-cases"],
+    ),
+
+    Task(
+        id="cascade_root_cause",
+        title="找出根因而不是逐个打补丁",
+        prompt=(
+            "check.py 报了多处不一致。这些失败很可能来自同一个根因，"
+            "请找到并修复**根因**，而不是在每个调用点分别打补丁。"
+        ),
+        files={
+            "shapes.py": (
+                "def area(kind, a, b=None):\n"
+                '    """算面积。kind: rect / tri / circle。"""\n'
+                "    if kind == 'rect':\n"
+                "        return a * b\n"
+                "    if kind == 'tri':\n"
+                "        return a * b / 2\n"
+                "    if kind == 'circle':\n"
+                "        return 3.14 * a * a\n"
+                "    raise ValueError(kind)\n"
+            ),
+            "r1.py": "from shapes import area\n\n\ndef f1(): return area('rect', 3, 4)\n",
+            "r2.py": "from shapes import area\n\n\ndef f2(): return area('tri', 4, 6)\n",
+            "r3.py": "from shapes import area\n\n\ndef f3(): return area('circle', 2)\n",
+            "r4.py": "from shapes import area\n\n\ndef f4(): return area('rect', 5, 5)\n",
+            "r5.py": "from shapes import area\n\n\ndef f5(): return area('tri', 2, 2)\n",
+            "check.py": (
+                "from r1 import f1\n"
+                "from r2 import f2\n"
+                "from r3 import f3\n"
+                "from r4 import f4\n"
+                "from r5 import f5\n"
+                "\n"
+                "assert f1() == 12, f1()\n"
+                "assert f2() == 12, f2()\n"
+                "assert f3() == 12, f3()\n"
+                "assert f4() == 25, f4()\n"
+                "assert f5() == 2, f5()\n"
+                'print("ok")\n'
+            ),
+        },
+        check_cmd="python3 check.py",
+        # 根因修好 = 所有调用点都不用改；用 git 检查 r*.py 没被动过
+        extra_check="git diff --quiet -- r1.py r2.py r3.py r4.py r5.py",
+        tags=["hard", "root-cause"],
+    ),
+
+    Task(
+        id="needle_in_haystack",
+        title="在几千行里定位一个逻辑错误",
+        prompt=(
+            "项目里有 6 个结构相似的模块，每个有 90 个函数。"
+            "其中**恰好一个**函数的逻辑写错了，check.py 会告诉你哪里不对。"
+            "请找出并修复它。"
+        ),
+        files=dict(_HAYSTACK_FILES),
+        check_cmd="python3 check.py",
+        timeout=900,
+        tags=["hard", "navigation", "context-pressure"],
+    ),
+
+    Task(
+        id="fix_and_add_test",
+        title="修 bug 并补一个回归测试",
+        prompt=(
+            "percent.py 里的 pct_change 在「基数为 0」时行为不对。"
+            "请修复它，**并补一个能覆盖这个场景的回归测试**（写进 tests.py）。"
+        ),
+        files={
+            "percent.py": (
+                "def pct_change(old, new):\n"
+                '    """变化百分比。old 为 0 时无法计算，应返回 None。"""\n'
+                "    return (new - old) / old * 100      # 没处理 old == 0\n"
+            ),
+            "tests.py": (
+                "from percent import pct_change\n"
+                "\n"
+                "assert pct_change(100, 150) == 50.0\n"
+                'print("ok")\n'
+            ),
+            "check.py": (
+                "from percent import pct_change\n"
+                "\n"
+                "assert pct_change(100, 150) == 50.0\n"
+                "assert pct_change(100, 50) == -50.0\n"
+                "assert pct_change(0, 10) is None, pct_change(0, 10)\n"
+                'print("ok")\n'
+            ),
+        },
+        check_cmd="python3 check.py",
+        # 必须真的补了测试，而且这个测试能抓住原 bug
+        extra_check=(
+            "python3 -c \"import subprocess,sys;"
+            "src=open('tests.py').read();"
+            "sys.exit(0 if 'pct_change(0' in src.replace(' ','') else 1)\""
+        ),
+        tags=["hard", "test-writing"],
+    ),
+
+    Task(
+        id="multi_step_migration",
+        title="多步迁移：改名 + 补功能 + 更新所有调用方",
+        prompt=(
+            "把 store.py 里的 get 改名为 fetch，给它加上默认值参数 default，"
+            "并更新所有调用方。check.py 必须通过，且不能留下旧的 get。"
+        ),
+        files={
+            "store.py": (
+                "class Store:\n"
+                "    def __init__(self):\n"
+                "        self._d = {}\n"
+                "\n"
+                "    def put(self, k, v):\n"
+                "        self._d[k] = v\n"
+                "\n"
+                "    def get(self, k):\n"
+                "        return self._d[k]\n"
+            ),
+            "svc_a.py": "from store import Store\n\n\ndef a(s):\n    return s.get('a')\n",
+            "svc_b.py": "from store import Store\n\n\ndef b(s):\n    return s.get('b')\n",
+            "check.py": (
+                "from store import Store\n"
+                "from svc_a import a\n"
+                "from svc_b import b\n"
+                "\n"
+                "s = Store()\n"
+                "s.put('a', 1)\n"
+                "s.put('b', 2)\n"
+                "assert s.fetch('a') == 1\n"
+                "assert s.fetch('zzz', 'fallback') == 'fallback'\n"
+                "assert a(s) == 1 and b(s) == 2\n"
+                "assert not hasattr(s, 'get'), '旧的 get 应当已改名'\n"
+                'print("ok")\n'
+            ),
+        },
+        check_cmd="python3 check.py",
+        # 用 AST 判断「store.py 里没有名为 get 的方法」。
+        # 早先用的是 grep '\\.get(' —— 会把实现内部正当使用的 dict.get() 也匹配上，
+        # 造成「模型明明做对了却判失败」。调用方是否更新由 check.py 的 a(s)/b(s) 覆盖。
+        extra_check=(
+            "python3 -c \"import ast,sys;"
+            "t=ast.parse(open('store.py').read());"
+            "n=[x.name for x in ast.walk(t) if isinstance(x, ast.FunctionDef)];"
+            "sys.exit(1 if 'get' in n else 0)\""
+        ),
+        tags=["hard", "migration", "multi-file"],
+    ),
+
+    Task(
+        id="strict_output_format",
+        title="生成严格格式的报告",
+        prompt=(
+            "report.py 的 build 还没实现。请按文档字符串里的格式要求实现，"
+            "输出必须逐字符匹配（check.py 会比对）。"
+        ),
+        files={
+            "report.py": (
+                "def build(rows):\n"
+                '    """生成定宽文本表格。\n'
+                "\n"
+                "    规格（必须逐字符一致）：\n"
+                "      - 每行 `| 值 |`，值左对齐，列宽 = 该列所有值中最长者的长度\n"
+                "      - 第一行是表头，表头下面是一条分隔线：每列 `+` 后跟 (宽度+2) 个 `-`\n"
+                "      - 分隔线形如 `+-----+----+`（首尾都是 +）\n"
+                "      - 值里若有非 ASCII 字符，**按显示宽度算**（中文算 2，其它算 1）\n"
+                "      - 空 rows → 返回空字符串\n"
+                "      - 每行以 \\\\n 结尾（最后一行也有）\n"
+                '    """\n'
+                "    raise NotImplementedError\n"
+            ),
+            "check.py": (
+                "from report import build\n"
+                "\n"
+                "got = build([['name', 'n'], ['ab', '1'], ['c', '22']])\n"
+                "want = (\n"
+                "    '| name | n  |\\n'\n"
+                "    '+------+----+\\n'\n"
+                "    '| ab   | 1  |\\n'\n"
+                "    '| c    | 22 |\\n'\n"
+                ")\n"
+                "assert got == want, repr(got)\n"
+                "assert build([]) == ''\n"
+                "\n"
+                "# 非 ASCII 按显示宽度算\n"
+                "g2 = build([['k', 'v'], ['中文', 'x']])\n"
+                "w2 = '| k    | v |\\n+------+---+\\n| 中文 | x |\\n'\n"
+                "assert g2 == w2, repr(g2)\n"
+                'print("ok")\n'
+            ),
+        },
+        check_cmd="python3 check.py",
+        tags=["hard", "format-strict"],
+    ),
+]
+
+
+# 合并进总表：难度递增，难题放后面
+ALL_TASKS.extend(HARD_TASKS)
+
+# 这条是**唯一**可能累积到触发上下文压缩的任务。
+# 别的任务 agent 会用 search_files / run_python 抄近路，上下文根本涨不起来 ——
+# 12 个文件要逐个读改验证，每一步的工具结果都留在 messages 里。
+ALL_TASKS.append(Task(
+    id="many_small_fixes",
+    title="连续修 12 个独立的小 bug",
+    prompt="check.py 会列出所有问题，请逐个修复，让 check.py 全部通过。",
+    files={
+        **{f"u{i:02d}.py": f"def v():\n    return {i} + 1   # 应为 {i}\n" for i in range(1, 13)},
+        "check.py": (
+            "import importlib\n"
+            "\n"
+            "bad = []\n"
+            "for i in range(1, 13):\n"
+            "    m = importlib.import_module(f'u{i:02d}')\n"
+            "    if m.v() != i:\n"
+            "        bad.append(f'u{i:02d}.v() == {m.v()}，应为 {i}')\n"
+            "assert not bad, bad\n"
+            'print("ok")\n'
+        ),
+    },
+    check_cmd="python3 check.py",
+    timeout=900,
+    tags=["hard", "persistence", "context-pressure"],
+))
+
+
 def get_task(task_id: str) -> Task | None:
     return next((t for t in ALL_TASKS if t.id == task_id), None)
 
