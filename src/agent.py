@@ -368,6 +368,18 @@ def run_agent_stream(
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT + memory_context + plan_context}
     ]
+    # 告诉前端「这是该会话的第几轮」——「第 N 轮改动」要用它。
+    # 续跑时会从 pending 恢复成同一个值（同一轮），所以前端不需要自己算。
+    _run_idx = None
+    try:
+        import runtime as _rt_start
+
+        _run_idx = _rt_start.get_run_index()
+    except Exception:                                       # noqa: BLE001
+        pass
+    if _run_idx:
+        yield {"type": "run_started", "run_index": _run_idx}
+
     if _project_ctx_msg:
         messages.append(_project_ctx_msg)
         yield {
@@ -404,6 +416,12 @@ def run_agent_stream(
                         del m["reasoning_content"]
             # 续跑时用 pending 里保存的原始任务，保证工具选择 / 上下文与中断前一致
             user_task = _pending.get("task") or user_task
+            # 恢复轮次：续跑属于同一轮
+            _ri = _pending.get("run_index")
+            if _ri:
+                import runtime as _rt_ri
+
+                _rt_ri.set_run_index(_ri)
             # 补上“缺失的 tool 消息”（避免悬空 tool_call 报 400）
             pending_tool = _pending.get("pending_tool")
             if pending_tool:
@@ -545,6 +563,16 @@ def run_agent_stream(
             _msgs = _kept
 
         _state = {"messages": _msgs, "step": _step, "task": user_task}
+        # 把轮次存进 pending：**续跑必须属于同一轮**，否则用户会在
+        # 「第 3 轮改动」里只看到一半 —— 另一半被记到了「第 4 轮」。
+        try:
+            import runtime as _rt
+
+            _ri = _rt.get_run_index()
+            if _ri:
+                _state["run_index"] = _ri
+        except Exception:                                   # noqa: BLE001
+            pass
         if _pending_tool:
             _state["pending_tool"] = _pending_tool
             _state["confirm_token"] = _confirm_token

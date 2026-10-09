@@ -41,6 +41,23 @@ def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
 
 
 @pytest.fixture(autouse=True)
+def _reset_runtime_context():
+    """每个用例前清掉 ContextVar 里的会话/轮次。
+
+    pytest 在同一个线程里跑所有用例，ContextVar 会**跨用例泄漏** ——
+    上一个用例设了 run_index，下一个用例就会莫名其妙多出个 run_started 事件，
+    表现为「单独跑通过、全量跑失败」这种最难查的顺序依赖。
+    """
+    import runtime
+
+    runtime.set_run_index(None)
+    runtime.set_session_id(None)
+    yield
+    runtime.set_run_index(None)
+    runtime.set_session_id(None)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_trash(tmp_path, monkeypatch):
     """所有用例一律不得写入真实回收站。
 

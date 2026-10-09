@@ -103,6 +103,31 @@ def init_db():
     if "open_files" not in wcols:
         cursor.execute("ALTER TABLE workspaces ADD COLUMN open_files TEXT")
 
+    # 每轮改动的记录（供「第 N 轮改动」与 diff 查看）。
+    # **存 unified diff 文本而不是 before/after 快照**：
+    #   1. 「本轮改了什么」的语义天然准确 —— 不会因为用户之后又改了文件而失真
+    #   2. 不用为了看 diff 再读一次磁盘
+    #   3. DB 里就是文本，可查询、可导出
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS run_changes (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id   INTEGER NOT NULL,
+            run_index    INTEGER NOT NULL,
+            path         TEXT    NOT NULL,
+            change_type  TEXT    NOT NULL,
+            tool         TEXT,
+            diff         TEXT,
+            added        INTEGER DEFAULT 0,
+            removed      INTEGER DEFAULT 0,
+            truncated    INTEGER DEFAULT 0,
+            created_at   TEXT    DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_run_changes "
+        "ON run_changes(session_id, run_index)"
+    )
+
     # 会话级权限等级：1 只读 / 2 确认（默认）/ 3 完全。
     # 存在会话上而不是做全局开关，是因为同一工作区里「只读看代码」和「放手重构」
     # 是完全不同的诉求，而且本应用支持多会话并行跑，全局开关做不到这个区分。
@@ -455,6 +480,105 @@ def delete_session(session_id: int):
     cursor.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
     conn.commit()
     conn.close()
+
+
+def count_user_messages(session_id: int) -> int:
+    """该会话有几条用户消息 —— **这就是「第几轮」的来源**。"""
+    conn = _connect()
+    n = conn.execute(
+        "SELECT COUNT(*) FROM messages WHERE session_id = ? AND role = 'user'",
+        (session_id,),
+    ).fetchone()[0]
+    conn.close()
+    return int(n or 0)
+
+
+def record_change(session_id: int, run_index: int, path: str, change_type: str,
+                  tool: str = "", diff: str = "", added: int = 0, removed: int = 0,
+                  truncated: bool = False) -> None:
+    """记一条本轮的文件改动。
+
+    **同一个文件在同一轮里被改多次时合并**：把新的 diff 接到后面。
+    否则「本轮改了哪些文件」会列出重复条目，用户看到的是流水账而不是结果。
+    """
+    conn = _connect()
+    row = conn.execute(
+        "SELECT id, diff, added, removed, change_type FROM run_changes "
+        "WHERE session_id = ? AND run_index = ? AND path = ?",
+        (session_id, run_index, path),
+    ).fetchone()
+    if row:
+        old_diff = row[1] or ""
+        merged = (old_diff + "\n" + diff) if diff else old_diff
+        # 保留最有信息量的类型：本轮**新建**的文件后面又被改，仍应显示「新建」
+        # （否则用户看到的是「修改」，就不知道这个文件是本轮才出现的）。
+        # 但「删掉了」永远优先 —— 那是最重要的信息。
+        prev_type = row[4]
+        if change_type == "delete":
+            merged_type = "delete"
+        elif prev_type == "create":
+            merged_type = "create"
+        else:
+            merged_type = change_type
+        conn.execute(
+            "UPDATE run_changes SET change_type = ?, tool = ?, diff = ?, "
+            "added = added + ?, removed = removed + ?, truncated = ? WHERE id = ?",
+            (merged_type, tool, merged, added, removed, 1 if truncated else 0, row[0]),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO run_changes "
+            "(session_id, run_index, path, change_type, tool, diff, added, removed, truncated) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, run_index, path, change_type, tool, diff, added, removed,
+             1 if truncated else 0),
+        )
+    conn.commit()
+    conn.close()
+
+
+def get_run_changes(session_id: int, run_index: int) -> list:
+    """某一轮改了哪些文件（不含 diff 正文，列表用）。"""
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT path, change_type, tool, added, removed, truncated, created_at "
+        "FROM run_changes WHERE session_id = ? AND run_index = ? ORDER BY id",
+        (session_id, run_index),
+    ).fetchall()
+    conn.close()
+    return [
+        {"path": r[0], "change_type": r[1], "tool": r[2], "added": r[3] or 0,
+         "removed": r[4] or 0, "truncated": bool(r[5]), "created_at": r[6]}
+        for r in rows
+    ]
+
+
+def get_run_change_diff(session_id: int, run_index: int, path: str):
+    """某一个文件在该轮的 diff 正文。"""
+    conn = _connect()
+    row = conn.execute(
+        "SELECT diff, added, removed, truncated, change_type FROM run_changes "
+        "WHERE session_id = ? AND run_index = ? AND path = ?",
+        (session_id, run_index, path),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {"diff": row[0] or "", "added": row[1] or 0, "removed": row[2] or 0,
+            "truncated": bool(row[3]), "change_type": row[4]}
+
+
+def get_changed_run_indexes(session_id: int) -> list:
+    """该会话哪些轮次有改动记录（历史回看用，倒序）。"""
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT run_index, COUNT(*) AS n, SUM(added) AS a, SUM(removed) AS r "
+        "FROM run_changes WHERE session_id = ? GROUP BY run_index ORDER BY run_index DESC",
+        (session_id,),
+    ).fetchall()
+    conn.close()
+    return [{"run_index": r[0], "files": r[1], "added": r[2] or 0, "removed": r[3] or 0}
+            for r in rows]
 
 
 def save_message(session_id: int, role: str, content: str):

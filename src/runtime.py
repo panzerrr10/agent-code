@@ -56,6 +56,20 @@ def session_key(session_id=None) -> str:
     return str(sid) if sid is not None else DEFAULT_SESSION_KEY
 
 
+# ===== 当前轮次（第几轮改动）=====
+# 一次 /run = 一轮；**续跑算同一轮**（否则用户会在「第 3 轮」里只看到一半改动）。
+# 工具层要拿它来给变更记录打标签，所以走 ContextVar。
+_run_index_var = contextvars.ContextVar("run_index", default=None)
+
+
+def set_run_index(index):
+    _run_index_var.set(index)
+
+
+def get_run_index():
+    return _run_index_var.get()
+
+
 # ===== 主配置（每请求隔离）=====
 _api_key_var = contextvars.ContextVar("api_key", default=None)
 _base_url_var = contextvars.ContextVar("base_url", default=None)

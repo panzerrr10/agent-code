@@ -576,6 +576,74 @@ def new_session():
     return jsonify({"id": sid, "title": "新对话", "workspace_id": actual_wid})
 
 
+# ============ 本轮改动（第 N 轮改动）============
+def _require_session(session_id):
+    """校验会话存在，返回 (session_id, 错误响应)。"""
+    try:
+        sid = int(session_id)
+    except (TypeError, ValueError):
+        return None, (jsonify({"ok": False, "error": "session_id 必须是整数"}), 400)
+    if not db.get_session(sid):
+        return None, (jsonify({"ok": False, "error": "会话不存在"}), 404)
+    return sid, None
+
+
+@app.route("/api/run_changes", methods=["GET"])
+def api_run_changes():
+    """某一轮改了哪些文件（不含 diff 正文）。"""
+    sid, err = _require_session(request.args.get("session_id"))
+    if err:
+        return err
+    try:
+        ridx = int(request.args.get("run_index"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "run_index 必须是整数"}), 400
+
+    changes = db.get_run_changes(sid, ridx)
+    return jsonify({
+        "ok": True,
+        "session_id": sid,
+        "run_index": ridx,
+        "files": changes,
+        "added": sum(c["added"] for c in changes),
+        "removed": sum(c["removed"] for c in changes),
+    })
+
+
+@app.route("/api/run_change_diff", methods=["GET"])
+def api_run_change_diff():
+    """某个文件在某一轮的 diff 正文。
+
+    **只从数据库读，不碰磁盘** —— 这条很重要：因为是「本轮改了什么」，
+    如果去读当前磁盘内容，用户之后又改过的话看到的就不是当轮的了。
+    """
+    sid, err = _require_session(request.args.get("session_id"))
+    if err:
+        return err
+    try:
+        ridx = int(request.args.get("run_index"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "run_index 必须是整数"}), 400
+
+    path = request.args.get("path") or ""
+    if not path:
+        return jsonify({"ok": False, "error": "缺少 path"}), 400
+
+    data = db.get_run_change_diff(sid, ridx, path)
+    if data is None:
+        return jsonify({"ok": False, "error": "该轮没有这个文件的改动记录"}), 404
+    return jsonify({"ok": True, "session_id": sid, "run_index": ridx, "path": path, **data})
+
+
+@app.route("/api/run_changes/history", methods=["GET"])
+def api_run_changes_history():
+    """该会话哪些轮次有改动（刷新页面 / 历史回看用）。"""
+    sid, err = _require_session(request.args.get("session_id"))
+    if err:
+        return err
+    return jsonify({"ok": True, "session_id": sid, "rounds": db.get_changed_run_indexes(sid)})
+
+
 # ============ 项目约定（AGENTS.md）============
 def _workspace_root(workspace_id) -> str | None:
     if not workspace_id:
@@ -1084,6 +1152,9 @@ def run():
             if not resume:
                 # 续跑（resume）时上一轮已存过用户消息，不再重复入库
                 db.save_message(session_id, "user", _pack_user_content(task, images))
+                # 「第几轮」= 该会话已有的用户消息数（刚存的这条算本轮）。
+                # 续跑时**不重新算** —— 它属于同一轮，轮次从 pending 里恢复。
+                _rt_run.set_run_index(db.count_user_messages(session_id))
                 # 自动命名：如果会话还是"新对话"，用任务前 20 字命名
                 sessions = db.get_all_sessions()
                 for s in sessions:

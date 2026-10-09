@@ -217,6 +217,73 @@ def get_file_info(path: str) -> str:
         return f"❌ 获取信息失败：{e}"
 
 
+# ===== 本轮改动记录（供「第 N 轮改动」+ diff 查看）=====
+# 单文件 diff 的上限。**必须有限制** —— 改一个几千行的文件能生成上万行 diff，
+# 既拖慢接口也会把前端渲染卡住。
+MAX_DIFF_LINES = 4000
+MAX_DIFF_CHARS = 256 * 1024
+
+
+def _read_text_safe(path) -> str:
+    """尽力读文本；读不到就当空（二进制/权限问题不该让记录流程崩掉）。"""
+    if not path or not os.path.isfile(path):
+        return ""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def _make_diff(path: str, before: str, after: str):
+    """生成 unified diff，返回 (文本, 新增行数, 删除行数, 是否截断)。
+
+    用标准库 ``difflib``，**不要自己写 LCS** —— 前端的朴素 DP 是 O(m×n)，
+    几千行的文件就是几千万格，会把浏览器卡死。
+    """
+    import difflib
+
+    name = os.path.basename(path)
+    lines = list(difflib.unified_diff(
+        (before or "").splitlines(keepends=True),
+        (after or "").splitlines(keepends=True),
+        fromfile=f"a/{name}", tofile=f"b/{name}", n=3,
+    ))
+    added = sum(1 for ln in lines if ln.startswith("+") and not ln.startswith("+++"))
+    removed = sum(1 for ln in lines if ln.startswith("-") and not ln.startswith("---"))
+    text = "".join(lines)
+    truncated = False
+    if len(lines) > MAX_DIFF_LINES or len(text) > MAX_DIFF_CHARS:
+        text = "".join(lines[:MAX_DIFF_LINES])[:MAX_DIFF_CHARS]
+        truncated = True
+    return text, added, removed, truncated
+
+
+def _record_change(abs_path: str, change_type: str, tool: str,
+                   before: str, after: str) -> None:
+    """记一条本轮改动。
+
+    **拿不到会话/轮次时静默跳过**：CLI 单次运行、评估集、单元测试里没有
+    「轮次」这个概念，不该因为记录失败而影响工具本身的返回值。
+    """
+    try:
+        import runtime
+
+        sid = runtime.get_session_id()
+        ridx = runtime.get_run_index()
+        if not sid or not ridx:
+            return
+        import db
+
+        text, added, removed, truncated = _make_diff(abs_path, before, after)
+        db.record_change(sid, ridx, abs_path, change_type, tool,
+                         text, added, removed, truncated)
+    except Exception:                                       # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).warning("记录本轮改动失败（不影响工具结果）", exc_info=True)
+
+
 def create_file(path: str, content: str) -> str:
     """新建文件。如果文件已存在，拒绝执行（保护已有文件）"""
     path = _normalize_path(path)
@@ -242,6 +309,7 @@ def create_file(path: str, content: str) -> str:
         with open(abs_path, "w", encoding="utf-8") as f:
             f.write(content)
 
+        _record_change(abs_path, "create", "create_file", "", content)
         return f"✅ 已创建文件：{path}（{len(content)} 字符）"
     except Exception as e:
         return f"❌ 创建失败：{e}"
@@ -263,10 +331,15 @@ def delete_file(path: str) -> str:
         if os.path.isdir(abs_path):
             return f"❌ 只能删除文件，不能删除目录：{path}"
 
+        # 读一份内容：删除也要能在「第 N 轮改动」里看出删了什么
+        before_text = _read_text_safe(abs_path)
+
         # 移入回收站（同时写 sidecar 记录原始路径，前端可一键恢复）
         trash_path = trash.move_to_trash(abs_path)
         if not trash_path:
             return "❌ 删除失败：无法移入回收站"
+
+        _record_change(abs_path, "delete", "delete_file", before_text, "")
         return (
             f"✅ 已删除（移入回收站）：{path}\n"
             f"回收站条目：{os.path.basename(trash_path)}（可在界面「回收站」里一键恢复）"
@@ -293,12 +366,17 @@ def write_file(path: str, content: str) -> str:
         if len(content) > MAX_FILE_SIZE:
             return f"❌ 内容太大（{len(content)} 字符），超过限制"
 
+        # 先读一份改动前的内容（既给 diff 用，也顺手校验可读性）
+        before_text = _read_text_safe(abs_path)
+
         # 先备份原文件到 .trash（带 sidecar，前端可一键恢复）
         backup_path = trash.backup_file(abs_path, kind="backup")
 
         # 写入新内容
         with open(abs_path, "w", encoding="utf-8") as f:
             f.write(content)
+
+        _record_change(abs_path, "modify", "write_file", before_text, content)
 
         return (
             f"✅ 已写入文件：{path}（{len(content)} 字符）\n"
@@ -344,6 +422,8 @@ def edit_file(path: str, old_text: str, new_text: str) -> str:
 
         with open(abs_path, "w", encoding="utf-8") as f:
             f.write(new_content)
+
+        _record_change(abs_path, "modify", "edit_file", content, new_content)
 
         return (
             f"✅ 已替换 1 处（{len(old_text)} → {len(new_text)} 字符）\n"
@@ -1066,6 +1146,10 @@ def multi_edit(edits: list) -> str:
             with open(abs_path, "w", encoding="utf-8") as f:
                 f.write(new_content)
             written.append((backup, abs_path))
+            # 改动前的内容从备份里读 —— pending 在阶段 1 就已经被替换成新内容了，
+            # 那里拿不到原文；而 backup 刚做出来，正好是改动前的快照。
+            _record_change(abs_path, "modify", "multi_edit",
+                           _read_text_safe(backup), new_content)
     except Exception as e:
         for backup, abs_path in written:
             if not backup:

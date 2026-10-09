@@ -113,7 +113,9 @@ def test_cancel_saves_resumable_state(monkeypatch):
     events = list(agent.run_agent_stream("随便干点啥", session_id="s1", user_api_key="k"))
     types = [e["type"] for e in events]
 
-    assert types[0] == "cancelled"
+    # 开头可能有 run_started（告诉前端是第几轮），其余第一个事件必须是 cancelled
+    core = [t for t in types if t != "run_started"]
+    assert core[0] == "cancelled", types
     assert types[-1] == "done"
     assert "可从断点继续" in events[0]["content"]
 

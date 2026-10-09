@@ -2043,6 +2043,203 @@
         body.dark .set-hint.warn { background: #2c2410; border-color: #4d3a10; color: #fbbf24; }
         body.dark .set-hint code { background: #232833; }
 
+        /* ===== 只读 diff 视图（右侧面板）===== */
+        .fp-diff {
+            flex: 1;
+            min-height: 0;
+            overflow: auto;
+            padding: 8px 10px;
+            font-family: ui-monospace, Menlo, monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            background: var(--bg-app, #fff);
+        }
+
+        .fp-diff .diff-line {
+            display: block;
+            white-space: pre-wrap;
+            word-break: break-all;
+            padding: 0 4px;
+        }
+
+        .fp-diff .diff-add { background: rgba(34, 197, 94, .16); color: #15803d; }
+        .fp-diff .diff-del { background: rgba(239, 68, 68, .16); color: #b91c1c; }
+        .fp-diff .diff-unchanged { color: #6b7280; }
+        .fp-diff .diff-hunk {
+            background: rgba(99, 102, 241, .12);
+            color: #4338ca;
+            margin: 6px 0 3px;
+            border-radius: 4px;
+        }
+
+        .fp-diff-empty, .fp-diff-note {
+            color: #6b7280;
+            font-size: 12px;
+            padding: 10px 4px;
+        }
+
+        .fp-diff-note { color: #b45309; background: #fffbeb; border-radius: 6px; margin-bottom: 8px; }
+
+        /* diff 标签在标签栏里换个颜色，一眼区分「内容」和「改动」 */
+        .fp-tab-diff { background: #eef2ff; color: #3730a3; }
+        .fp-tab-diff.active { box-shadow: inset 0 2px 0 #6366f1; }
+
+        body.dark .fp-diff { background: #1b1f27; }
+        body.dark .fp-diff .diff-unchanged { color: #6b7280; }
+        body.dark .fp-tab-diff { background: #262b3a; color: #a5b4fc; }
+        body.dark .fp-diff-note { background: #2c2410; color: #fbbf24; }
+
+        /* ===== 可展开的工具调用行 ===== */
+        .tool-details { margin: 2px 0; }
+
+        .tool-details > summary {
+            cursor: pointer;
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            padding: 3px 6px;
+            border-radius: 5px;
+            list-style: none;
+            font-size: 12px;
+        }
+
+        .tool-details > summary::-webkit-details-marker { display: none; }
+        .tool-details > summary:hover { background: rgba(127, 127, 127, .1); }
+
+        .tool-name { font-weight: 600; color: #4338ca; white-space: nowrap; }
+
+        .tool-brief {
+            color: #6b7280;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
+            font-family: ui-monospace, Menlo, monospace;
+            font-size: 11px;
+        }
+
+        .tool-full {
+            margin: 4px 0 8px 14px;
+            padding-left: 9px;
+            border-left: 2px solid #e5e7eb;
+        }
+
+        .tool-full-label {
+            font-size: 10.5px;
+            color: #9ca3af;
+            margin: 5px 0 2px;
+        }
+
+        .tool-args {
+            margin: 0;
+            padding: 6px 8px;
+            background: #f9fafb;
+            border: 1px solid #eef0f3;
+            border-radius: 5px;
+            font-size: 11px;
+            line-height: 1.55;
+            max-height: 220px;
+            overflow: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        body.dark .tool-name { color: #a5b4fc; }
+        body.dark .tool-args { background: #232833; border-color: #2a2f3a; color: #cbd5e1; }
+        body.dark .tool-full { border-color: #333a47; }
+
+        /* ===== 「第 N 轮改动」卡片 ===== */
+        .round-card {
+            margin-top: 8px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #fbfbfd;
+        }
+
+        .round-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 10px;
+            cursor: pointer;
+            font-size: 12.5px;
+            user-select: none;
+        }
+
+        .round-head:hover { background: #f3f4f6; }
+
+        .round-arrow { color: #9ca3af; font-size: 11px; width: 10px; }
+        .round-title { font-weight: 600; color: #111827; }
+        .round-meta { color: #6b7280; font-size: 11.5px; margin-left: auto; }
+
+        /* 展开后**固定高度可滚动** —— 改了几十个文件也不会把对话撑爆 */
+        .round-list {
+            max-height: 260px;
+            overflow-y: auto;
+            border-top: 1px solid #eef0f3;
+        }
+
+        .round-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 10px;
+            font-size: 12px;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        .round-item:last-child { border-bottom: none; }
+        .round-item:hover { background: #f9fafb; }
+
+        .round-badge {
+            width: 16px;
+            text-align: center;
+            font-size: 10.5px;
+            font-weight: 700;
+            border-radius: 4px;
+            flex-shrink: 0;
+        }
+
+        .round-badge.create { background: #d1fae5; color: #065f46; }
+        .round-badge.modify { background: #fef3c7; color: #92400e; }
+        .round-badge.delete { background: #fee2e2; color: #991b1b; }
+
+        .round-file {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-family: ui-monospace, Menlo, monospace;
+            font-size: 11.5px;
+            color: #374151;
+        }
+
+        .round-stat { color: #6b7280; font-size: 11px; flex-shrink: 0; }
+        .round-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+        .round-btn {
+            border: 1px solid #e5e7eb;
+            background: #fff;
+            border-radius: 5px;
+            font-size: 10.5px;
+            padding: 2px 6px;
+            cursor: pointer;
+            color: #4b5563;
+            white-space: nowrap;
+        }
+
+        .round-btn:hover { background: #f3f4f6; border-color: #c7d2fe; color: #3730a3; }
+
+        body.dark .round-card { background: #1b1f27; border-color: #2a2f3a; }
+        body.dark .round-head:hover { background: #232833; }
+        body.dark .round-title { color: #e5e7eb; }
+        body.dark .round-list { border-color: #2a2f3a; }
+        body.dark .round-item { border-color: #232833; }
+        body.dark .round-item:hover { background: #232833; }
+        body.dark .round-file { color: #cbd5e1; }
+        body.dark .round-btn { background: #232833; border-color: #333a47; color: #cbd5e1; }
+
         /* ===== 项目约定 ===== */
         .pc-src {
             display: flex;
@@ -2923,6 +3120,8 @@
                     <span class="fp-dirty" id="fpDirty" style="display: none;">● 未保存</span>
                 </div>
                 <div class="fp-editor" id="fpEditor"></div>
+                <!-- 只读 diff 视图（点「改动过的文件」时用，与上面的编辑器互斥显示） -->
+                <div class="fp-diff" id="fpDiff" style="display: none;"></div>
                 <div class="fp-notice" id="fpNotice" style="display: none;"></div>
                 <div class="fp-foot">
                     <button class="fp-btn primary" id="fpSaveBtn" onclick="saveFile()" disabled>💾 保存</button>
@@ -3444,6 +3643,8 @@
                                 lastResultEl = appendToolCall(ctx, ev.name, ev.args);
                                 // 记下本次会写盘的文件，跑完给「下载 / 打开」入口
                                 collectProduced(ctx, ev.name, ev.args);
+                            } else if (ev.type === "run_started") {
+                                ctx.runIndex = ev.run_index;
                             } else if (ev.type === "context_stats") {
                                 updateContextStats(ctx, ev);
                             } else if (ev.type === "project_context") {
@@ -3498,7 +3699,7 @@
                                 ctx.bubble.textContent = "⚠️ " + ev.content;
                             } else if (ev.type === "done") {
                                 ctx.details.open = false;
-                                renderProducedFiles(ctx);
+                                finishRoundCard(ctx, mySessionId);
                             }
                         } catch (e) { }
                     }
@@ -3654,6 +3855,21 @@
         }
 
         /**
+         * 收尾：把流式期间的临时芯片换成「第 N 轮改动」卡片。
+         *
+         * 临时芯片只知道「碰过哪些文件」，卡片能给出**每处改动多少行**，
+         * 并且每一行都能点开看**本轮 diff**。
+         */
+        function finishRoundCard(ctx, sid) {
+            if (!ctx || !ctx.bubble || !ctx.bubble.parentElement) return;
+            const live = ctx.bubble.parentElement.querySelector(".bubble-attachments");
+            if (live) live.remove();
+            if (ctx.runIndex && sid) {
+                renderRoundCard(ctx.bubble.parentElement, sid, ctx.runIndex, null);
+            }
+        }
+
+        /**
          * 本次运行产出/修改过的文件，带「打开」「下载」。
          * 这直接对应需求里的「按要求改完文档后可以下载新文档」。
          */
@@ -3717,16 +3933,140 @@
             ctx.bubble.parentElement.appendChild(div);
         }
 
+        /** 一条工具调用的 HTML（实时与历史共用，保证两处外观一致）。 */
+        function toolItemHtml(toolName, toolArgs, icon, pretty) {
+            if (pretty === undefined) {
+                try { pretty = JSON.stringify(toolArgs, null, 2); } catch (e) { pretty = String(toolArgs); }
+            }
+            return `
+                <details class="tool-details">
+                    <summary>
+                        <span class="tool-name">${icon || "🔧"} ${escapeHtml(toolName)}</span>
+                        <span class="tool-brief">${escapeHtml(toolSummary(toolName, toolArgs))}</span>
+                    </summary>
+                    <div class="tool-full">
+                        <div class="tool-full-label">完整参数 / 指令</div>
+                        <pre class="tool-args">${escapeHtml(pretty)}</pre>
+                        <div class="tool-full-label">执行结果</div>
+                        <div class="tool-result">⏳ 执行中...</div>
+                    </div>
+                </details>`;
+        }
+
+        // ===== 「第 N 轮改动」卡片（需求 4/5/7）=====
+        const ROUND_BADGE = {
+            create: { cls: "create", text: "A" },
+            delete: { cls: "delete", text: "D" },
+            modify: { cls: "modify", text: "M" },
+        };
+
+        /**
+         * 渲染某一轮的改动卡片。
+         *
+         * - 默认收起，点标题展开
+         * - 展开后列表**固定高度可滚动**（改了几十个文件也不会把对话撑爆）
+         * - 点某一行 → openDiff() → 右侧只读 diff（与点项目树完全隔离）
+         */
+        function renderRoundCard(anchorEl, sessionId, runIndex, pre) {
+            if (!anchorEl) return;
+            const render = (j) => {
+                if (!j || !j.ok || !(j.files || []).length) return;
+                const files = j.files;
+                const box = document.createElement("div");
+                box.className = "round-card";
+                const items = files.map(f => {
+                    const b = ROUND_BADGE[f.change_type] || ROUND_BADGE.modify;
+                    const nm = String(f.path).split("/").pop();
+                    return `
+                    <div class="round-item" title="${escapeHtml(f.path)}">
+                        <span class="round-badge ${b.cls}">${b.text}</span>
+                        <span class="round-file">${escapeHtml(nm)}</span>
+                        <span class="round-stat">+${f.added} −${f.removed}</span>
+                        <span class="round-actions">
+                            <button type="button" class="round-btn"
+                                onclick="openDiff(${sessionId}, ${runIndex}, '${escapeHtml(f.path).replace(/'/g, "\\'")}')"
+                                title="在右侧查看本轮改动（只读）">查看改动</button>
+                            <button type="button" class="round-btn"
+                                onclick="openFile('${escapeHtml(f.path).replace(/'/g, "\\'")}')"
+                                title="在右侧打开文件内容（可编辑）">打开</button>
+                        </span>
+                    </div>`;
+                }).join("");
+                box.innerHTML = `
+                    <div class="round-head" onclick="toggleRoundCard(this)">
+                        <span class="round-arrow">▸</span>
+                        <span class="round-title">📝 第 ${runIndex} 轮改动</span>
+                        <span class="round-meta">${files.length} 个文件 · +${j.added} −${j.removed}</span>
+                    </div>
+                    <div class="round-list" style="display: none;">${items}</div>`;
+                anchorEl.appendChild(box);
+            };
+            if (pre) { render(pre); return; }
+            fetch(`/api/run_changes?session_id=${sessionId}&run_index=${runIndex}`)
+                .then(r => r.json())
+                .then(render)
+                .catch(e => console.warn("[round] 读取改动失败", e));
+        }
+
+        function toggleRoundCard(headEl) {
+            const list = headEl.nextElementSibling;
+            const arrow = headEl.querySelector(".round-arrow");
+            const open = list.style.display !== "none";
+            list.style.display = open ? "none" : "block";
+            if (arrow) arrow.textContent = open ? "▸" : "▾";
+        }
+
+        /** 历史轮次卡片：第 N 轮挂到第 N 条 assistant 消息下面（刷新页面也能回看）。 */
+        async function attachHistoryRoundCards(sessionId, roundEls) {
+            try {
+                const res = await fetch(`/api/run_changes/history?session_id=${sessionId}`);
+                const j = await res.json();
+                if (!j.ok) return;
+                for (const r of (j.rounds || [])) {
+                    const el = roundEls[r.run_index];
+                    if (el) renderRoundCard(el, sessionId, r.run_index, null);
+                }
+            } catch (e) {
+                console.warn("[round] 历史改动读取失败", e);
+            }
+        }
+
+        /** 工具调用的一行摘要：优先显示「到底执行了什么指令」。 */
+        function toolSummary(toolName, args) {
+            if (!args || typeof args !== "object") return "";
+            if (args.cmd) return String(args.cmd);                       // run_command：完整命令
+            if (args.code) return String(args.code).split("\n")[0].slice(0, 70);
+            if (Array.isArray(args.edits)) return `${args.edits.length} 处编辑`;
+            if (args.path) return String(args.path);
+            if (args.query) return String(args.query);
+            if (args.task) return String(args.task).slice(0, 70);
+            try { return JSON.stringify(args).slice(0, 70); } catch (e) { return ""; }
+        }
+
+        const TOOL_ICONS = {
+            read_file: "📖", read_file_range: "📖", list_dir: "📁", search_files: "🔍",
+            write_file: "💾", create_file: "✨", edit_file: "✏️", multi_edit: "✏️",
+            delete_file: "🗑️", run_command: "▶️", run_python: "🐍", run_tests: "🧪",
+            git_status: "🌿", git_diff: "🌿", git_log: "🌿", git_commit: "🌿",
+            create_plan: "📋", update_plan: "📋", search_knowledge: "📚",
+        };
+
+        /**
+         * 一条工具调用（**可点开**）。
+         *
+         * 点「做了什么」展开，能看到**完整参数与完整输出** ——
+         * 尤其是 run_command 的完整命令行、edit_file 的完整改动参数。
+         */
         function appendToolCall(ctx, toolName, toolArgs) {
             ctx.details.style.display = "block";
             const count = ctx.execList.children.length + 1;
             ctx.execTitle.textContent = `执行详情（${count} 个工具调用）`;
             const item = document.createElement("div");
             item.className = "exec-item";
-            item.innerHTML = `
-                <div class="tool-call">🔧 ${escapeHtml(toolName)}(${escapeHtml(JSON.stringify(toolArgs))})</div>
-                <div class="tool-result">⏳ 执行中...</div>
-            `;
+            const icon = TOOL_ICONS[toolName] || "🔧";
+            let pretty = "";
+            try { pretty = JSON.stringify(toolArgs, null, 2); } catch (e) { pretty = String(toolArgs); }
+            item.innerHTML = toolItemHtml(toolName, toolArgs, icon, pretty);
             ctx.execList.appendChild(item);
             chat.scrollTop = chat.scrollHeight;
             return item.querySelector(".tool-result");
@@ -3751,6 +4091,7 @@
             } catch (e) { }
 
             const ctx = addAssistantMessage(time);
+            ctx.restoredRoundTools = tools;
             ctx.bubble.innerHTML = DOMPurify.sanitize(marked.parse(answer || ""));
             // 高亮代码块
             ctx.bubble.querySelectorAll('pre code').forEach(block => {
@@ -3770,10 +4111,8 @@
                         ctx.execTitle.textContent = `执行详情（${count} 个工具调用）`;
                         const item = document.createElement("div");
                         item.className = "exec-item";
-                        item.innerHTML = `
-                            <div class="tool-call">🔧 ${escapeHtml(t.name)}(${escapeHtml(JSON.stringify(t.args))})</div>
-                            <div class="tool-result">⏳ 执行中...</div>
-                        `;
+                        item.innerHTML = toolItemHtml(
+                            t.name, t.args, TOOL_ICONS[t.name] || "🔧");
                         ctx.execList.appendChild(item);
                         lastResultEl = item.querySelector(".tool-result");
                     } else if (t.type === "tool_result" && lastResultEl) {
@@ -3788,6 +4127,7 @@
                     `⚡ <span class="token-num">${tokens.total_tokens}</span> tokens ` +
                     `(输入 ${tokens.prompt_tokens} · 输出 ${tokens.completion_tokens} · ${tokens.steps} 步)`;
             }
+            return ctx;   // 历史轮次要往这条消息下面挂「第 N 轮改动」卡片
         }
         // ============ 会话管理 ============
         // ===== 工作区 =====
@@ -4211,10 +4551,15 @@
             try {
                 const res = await fetch(`/history/${sessionId}`);
                 const messages = await res.json();
+                // 「第 N 轮」= 第 N 条用户消息。这里记下每条 assistant 消息属于第几轮，
+                // 稍后按轮次把改动卡片挂上去（刷新页面后历史轮次仍能回看）。
+                let _userCount = 0;
+                const _roundEls = {};
                 messages.forEach(m => {
                     const t = m.created_at && m.created_at.length >= 16
                         ? m.created_at.slice(0, 16) : "";
                     if (m.role === "user") {
+                        _userCount += 1;
                         // 历史里的用户消息可能是 JSON（含图片 data URL），解析后一起回显
                         let utext = m.content, uimgs = [];
                         try {
@@ -4226,9 +4571,13 @@
                         } catch (e) { /* 纯文本消息，保持原样 */ }
                         addUserMessage(utext, t, uimgs);
                     } else {
-                        restoreAssistantMessage(m.content, t);
+                        const _ctx = restoreAssistantMessage(m.content, t);
+                        if (_userCount && _ctx && _ctx.bubble) {
+                            _roundEls[_userCount] = _ctx.bubble.parentElement;
+                        }
                     }
                 });
+                attachHistoryRoundCards(sessionId, _roundEls);
 
                 // 若切回的会话有"运行中的任务"：从内存重绘 + 重新挂载实时输出
                 const st = sessionStates[sessionId];
@@ -4466,7 +4815,12 @@
             return tab.state ? tab.state.doc.toString() : "";
         }
 
-        function fpDirty(tab) { return !!tab && tabText(tab) !== tab.baseline; }
+        function fpDirty(tab) {
+            // diff 标签是只读快照，**永远不脏** —— 否则关面板/切工作区时会弹
+            // 「有未保存改动」，而它根本没有可保存的东西。
+            if (!tab || tab.kind === "diff") return false;
+            return tabText(tab) !== tab.baseline;
+        }
         function fpAnyDirty() { return fpTabs.some(fpDirty); }
         function fpIsDirty() { return fpDirty(fpCur()); }
 
@@ -4519,9 +4873,9 @@
             if (!fpTabs.length) { bar.style.display = "none"; bar.innerHTML = ""; return; }
             bar.style.display = "flex";
             bar.innerHTML = fpTabs.map((t, i) => `
-                <span class="fp-tab ${i === fpActive ? "active" : ""}" data-i="${i}"
-                      title="${escapeHtml(t.path)}">
-                    <span class="fp-tab-name">${escapeHtml(t.name)}${fpDirty(t) ? '<b class="fp-tab-dot">●</b>' : ""}</span>
+                <span class="fp-tab ${i === fpActive ? "active" : ""} ${t.kind === "diff" ? "fp-tab-diff" : ""}" data-i="${i}"
+                      title="${escapeHtml(t.title || t.path)}">
+                    <span class="fp-tab-name">${t.kind === "diff" ? "± " : ""}${escapeHtml(t.name)}${fpDirty(t) ? '<b class="fp-tab-dot">●</b>' : ""}</span>
                     <button type="button" class="fp-tab-x" data-close="${i}" title="关闭">✕</button>
                 </span>`).join("") + `<span class="fp-tab-count">${fpTabs.length}/${FP_MAX_TABS}</span>`;
         }
@@ -4550,14 +4904,17 @@
             if (cur && cmEditor) cur.state = cmEditor.getState();
             fpActive = idx;
             const tab = fpTabs[idx];
-            if (tab && cmEditor) {
+            // 只有「文件」标签才动 CodeMirror；diff 标签是另一套视图，
+            // **两者互不干扰** —— 同一个文件可以同时开着「内容」和「本轮 diff」两个标签。
+            if (tab && tab.kind !== "diff" && cmEditor) {
                 cmEditor.setState(tab.state);
                 cmEditor.setTheme(document.body.classList.contains("dark"));
             }
+            applyActiveTabView();
             renderTabs();
             renderFileHeader();
             updateFileButtons();
-            if (cmEditor && tab && !tab.readOnly) cmEditor.focus();
+            if (cmEditor && tab && tab.kind !== "diff" && !tab.readOnly) cmEditor.focus();
             if (cmEditor) setTimeout(() => cmEditor.requestMeasure(), 0);
         }
 
@@ -4587,8 +4944,111 @@
             persistTabs();
         }
 
+        /** 按当前标签类型切换编辑器 / diff 视图。 */
+        function applyActiveTabView() {
+            const tab = fpCur();
+            const isDiff = !!tab && tab.kind === "diff";
+            const ed = fpEl("fpEditor");
+            const df = fpEl("fpDiff");
+            if (ed) ed.style.display = isDiff ? "none" : "";
+            if (df) {
+                df.style.display = isDiff ? "block" : "none";
+                if (isDiff) {
+                    df.innerHTML = tab.diffHtml || "";
+                    df.scrollTop = 0;
+                }
+            }
+            if (!isDiff && cmEditor) setTimeout(() => cmEditor.requestMeasure(), 0);
+        }
+
+        /**
+         * 渲染后端给的 unified diff 文本（只读）。
+         *
+         * **刻意不用前端的 generateDiff** —— 那个是朴素 LCS，DP 表 O(m×n)，
+         * 几千行的文件就是几千万格、会把浏览器卡死。文件级 diff 一律后端算。
+         */
+        function renderUnifiedDiff(text) {
+            const lines = String(text || "").split("\n");
+            if (!lines.length || !String(text || "").trim()) {
+                return '<div class="fp-diff-empty">（没有可显示的差异）</div>';
+            }
+            let html = "";
+            for (const ln of lines) {
+                if (ln.startsWith("--- ") || ln.startsWith("+++ ")) continue;  // 文件头，没用
+                if (ln.startsWith("@@")) {
+                    html += `<span class="diff-line diff-hunk">${escapeHtml(ln)}</span>`;
+                } else if (ln.startsWith("+")) {
+                    html += `<span class="diff-line diff-add">${escapeHtml(ln)}</span>`;
+                } else if (ln.startsWith("-")) {
+                    html += `<span class="diff-line diff-del">${escapeHtml(ln)}</span>`;
+                } else {
+                    html += `<span class="diff-line diff-unchanged">${escapeHtml(ln)}</span>`;
+                }
+            }
+            return html;
+        }
+
+        /**
+         * 打开「本轮改动」的 diff（**与点项目树打开文件是两条独立的路**）。
+         *
+         * - 点项目树 → openFile() → kind:"file" → CodeMirror 可编辑
+         * - 点改动文件 → openDiff() → kind:"diff" → 只读 diff
+         * 两条路各自建标签，同一个文件可以同时开两个，互不影响。
+         */
+        async function openDiff(sessionId, runIndex, path) {
+            setFilePanelVisible(true);
+            const sid = sessionId != null ? sessionId : currentSessionId;
+            const key = `diff:${sid}:${runIndex}:${path}`;
+
+            const existing = fpTabs.findIndex(t => t.key === key);
+            if (existing >= 0) { activateTab(existing); return; }
+
+            if (fpTabs.length >= FP_MAX_TABS) {
+                showFileNotice(`最多同时打开 ${FP_MAX_TABS} 个标签，请先关掉一些。`, null, "warn");
+                return;
+            }
+
+            let data;
+            try {
+                const res = await fetch(`/api/run_change_diff?session_id=${sid}`
+                    + `&run_index=${runIndex}&path=${encodeURIComponent(path)}`);
+                data = await res.json();
+            } catch (e) {
+                showFileNotice("读取改动失败：" + e.message, null, "error");
+                return;
+            }
+            if (!data.ok) { showFileNotice(data.error || "读取改动失败", null, "error"); return; }
+
+            const name = String(path).split("/").pop();
+            const truncatedNote = data.truncated
+                ? '<div class="fp-diff-note">⚠️ 改动过大，仅显示前一部分</div>' : "";
+            fpTabs.push({
+                kind: "diff", key,
+                path, name,
+                title: `第 ${runIndex} 轮改动 · ${name}`,
+                runIndex, sessionId: sid,
+                diffHtml: truncatedNote + renderUnifiedDiff(data.diff),
+                added: data.added, removed: data.removed,
+                changeType: data.change_type,
+            });
+            fpActive = fpTabs.length - 1;
+            applyActiveTabView();
+            renderTabs();
+            renderFileHeader();
+            updateFileButtons();
+            clearFileNotice();
+        }
+
         function renderFileHeader() {
             const tab = fpCur();
+            if (tab && tab.kind === "diff") {
+                fpEl("fpName").textContent = `第 ${tab.runIndex} 轮改动 · ${tab.name}`;
+                fpEl("fpPath").textContent = tab.path;
+                fpEl("fpPath").title = tab.path;
+                const badge = { create: "新建", delete: "已删除", modify: "修改" }[tab.changeType] || "";
+                fpEl("fpInfo").textContent = `${badge} · 只读对比 · +${tab.added} −${tab.removed}`;
+                return;
+            }
             fpEl("fpName").textContent = tab ? tab.name : "未打开文件";
             fpEl("fpPath").textContent = tab ? tab.path : "";
             fpEl("fpPath").title = tab ? tab.path : "";
@@ -4623,7 +5083,9 @@
             // 防抖：连续开关标签/切工作区时不必每次都打服务端
             wsPersistTimer = setTimeout(() => {
                 const wsId = currentWorkspaceId;
-                const paths = fpTabs.map(t => t.path);
+                // 只持久化「文件」标签。diff 标签是某一轮的快照，
+                // 下次打开早就过期了，存下来只会在重启后弹出一堆无效标签。
+                const paths = fpTabs.filter(t => t.kind !== "diff").map(t => t.path);
                 fetch(`/workspaces/${wsId}/open_files`, {
                     method: "PUT",
                     headers: { "Content-Type": "application/json" },
@@ -4704,7 +5166,8 @@
         async function openFile(path) {
             setFilePanelVisible(true);
 
-            const existing = fpTabs.findIndex(t => t.path === path);
+            // 只在「文件」标签里查重 —— diff 标签虽然路径相同，但那是另一回事
+            const existing = fpTabs.findIndex(t => t.kind !== "diff" && t.path === path);
             if (existing >= 0) { activateTab(existing); return; }
 
             if (fpTabs.length >= FP_MAX_TABS) {
@@ -4729,6 +5192,7 @@
                 content, window.AgentCodeCM.detectLang(data.path), !data.editable);
 
             fpTabs.push({
+                kind: "file", key: `file:${data.path}`,
                 path: data.path, name, state, baseline: content,
                 hash: data.hash, eol: data.eol || "lf", readOnly: !data.editable,
                 size: data.size, message: data.message || "",
@@ -4736,6 +5200,7 @@
             fpActive = fpTabs.length - 1;
             cmEditor.setState(state);
             cmEditor.setTheme(document.body.classList.contains("dark"));
+            applyActiveTabView();
             renderTabs();
             renderFileHeader();
             updateFileButtons();
@@ -4752,17 +5217,19 @@
 
         function updateFileButtons() {
             const tab = fpCur();
+            const isDiff = !!tab && tab.kind === "diff";
             const dirty = fpIsDirty();
             const save = fpEl("fpSaveBtn");
             if (save) {
-                save.disabled = !dirty || (tab && tab.readOnly);
+                save.disabled = isDiff || !dirty || (tab && tab.readOnly);
                 save.textContent = dirty ? "💾 保存 *" : "💾 保存";
             }
             const dirtyTag = fpEl("fpDirty");
             if (dirtyTag) dirtyTag.style.display = dirty ? "inline" : "none";
-            if (fpEl("fpUndoBtn")) fpEl("fpUndoBtn").disabled = !cmEditor || !cmEditor.canUndo();
-            if (fpEl("fpRedoBtn")) fpEl("fpRedoBtn").disabled = !cmEditor || !cmEditor.canRedo();
-            if (fpEl("fpAskBtn")) fpEl("fpAskBtn").disabled = !tab;
+            // diff 是只读快照，撤销/重做/让 Agent 处理都无意义
+            if (fpEl("fpUndoBtn")) fpEl("fpUndoBtn").disabled = isDiff || !cmEditor || !cmEditor.canUndo();
+            if (fpEl("fpRedoBtn")) fpEl("fpRedoBtn").disabled = isDiff || !cmEditor || !cmEditor.canRedo();
+            if (fpEl("fpAskBtn")) fpEl("fpAskBtn").disabled = !tab || isDiff;
             renderTabs();   // 脏标记要跟着更新
         }
 
@@ -6231,6 +6698,15 @@
                                 } else {
                                     updatePhaseStatus(ctx, ev.name, ev.status);
                                 }
+                            } else if (ev.type === "run_started") {
+                                // 「第 N 轮」—— 轮次卡片要用
+                                ctx.runIndex = ev.run_index;
+                            } else if (ev.type === "context_stats") {
+                                updateContextStats(ctx, ev);
+                            } else if (ev.type === "project_context") {
+                                appendProjectContextNote(ctx, ev);
+                            } else if (ev.type === "permission_denied") {
+                                appendPermissionDenied(ctx, ev.content);
                             } else if (ev.type === "plan_from_planner") {
                                 const card = ctx.bubble.parentElement.querySelector(".phase-card:last-of-type .phase-body");
                                 if (card) {
@@ -6301,7 +6777,8 @@
                                 ctx.bubble.style.color = "#b91c1c";
                                 ctx.bubble.textContent = "⚠️ " + ev.content;
                             } else if (ev.type === "done") {
-                                ctx.details.open = false;
+                                // 替换流式期间的临时芯片为「第 N 轮改动」卡片
+                                finishRoundCard(ctx, mySessionId);
                             }
                         } catch (e) { }
                     }

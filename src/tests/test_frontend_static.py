@@ -152,3 +152,81 @@ def _loosely_defined(js: str, name: str) -> bool:
         rf"addEventListener\(\s*['\"]{esc}['\"]",
     ]
     return any(re.search(p, js) for p in patterns)
+
+
+# ============ SSE 事件处理的对称性 ============
+
+# 前端有**两套** SSE 消费循环：runTask（首次运行）和 resumeRun（续跑）。
+# 它们各自维护一份事件分支 —— 这是一个已知的重复，而重复的代价是：
+# **只往其中一份加处理器，另一份就静默漏掉这个事件。**
+#
+# 真实事故：上下文压缩的 context_stats、项目约定的 project_context、
+# 权限拒绝的 permission_denied、轮次的 run_started **全都只加在了 resumeRun 那份**，
+# 于是主路径下这些 UI 一个都不显示 —— 而且单元测试和 CDP 都没发现
+# （CDP 当时是用合成事件直接调渲染函数验证的，绕过了真实的事件分发）。
+CORE_EVENTS = [
+    "run_started",        # 第 N 轮
+    "text",
+    "tool_call",
+    "tool_result",
+    "token_usage",
+    "context_stats",      # 上下文压缩指示
+    "project_context",    # 项目约定提示
+    "permission_denied",  # 等级 1 拒绝
+    "plan_update",
+    "confirm_write",
+    "confirm_delete",
+    "confirm_command",
+    "cancelled",
+    "error",
+    "done",
+]
+
+
+def _function_body(js: str, signature: str) -> str:
+    """取出一个顶层函数的完整函数体（按缩进找配对的结束大括号）。"""
+    start = js.index(signature)
+    i = js.index("{", start)
+    depth = 0
+    for j in range(i, len(js)):
+        if js[j] == "{":
+            depth += 1
+        elif js[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return js[start:j + 1]
+    raise AssertionError(f"{signature} 的括号不配对")
+
+
+def test_both_sse_loops_handle_the_same_core_events():
+    """runTask 与 resumeRun 必须处理**同一套**核心事件。
+
+    这个测试拦的是「复制两份代码、只改一份」这类问题 ——
+    它的症状是「某个功能只在特定路径下生效」，极难在手工测试中发现。
+    """
+    js = _inline_js()
+    run_task = _function_body(js, "async function runTask(")
+    resume = _function_body(js, "async function resumeRun(")
+
+    missing_in_run = [e for e in CORE_EVENTS if f'ev.type === "{e}"' not in run_task]
+    missing_in_resume = [e for e in CORE_EVENTS if f'ev.type === "{e}"' not in resume]
+
+    assert not missing_in_run, (
+        f"runTask（主路径）没有处理这些事件：{missing_in_run}\n"
+        "它们很可能只加在了 resumeRun 那份循环里 —— 主路径下对应 UI 不会出现。"
+    )
+    assert not missing_in_resume, f"resumeRun（续跑路径）没有处理这些事件：{missing_in_resume}"
+
+
+def test_no_duplicate_sse_loop_is_a_known_risk():
+    """两套循环本身就是风险，这里记录当前状态：确实是两套。
+
+    如果将来合并成一套，这个测试会失败 —— 那是**好事**，
+    把 CORE_EVENTS 那份对称性检查一起删掉即可。
+    """
+    js = _inline_js()
+    readers = js.count("res.body.getReader()")
+    assert readers == 2, (
+        f"前端有 {readers} 处 SSE 消费点（预期 2：runTask 与 resumeRun）。"
+        "如果合并成了一处，请一并清理 CORE_EVENTS 对称性测试。"
+    )
