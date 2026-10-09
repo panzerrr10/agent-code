@@ -576,6 +576,63 @@ def new_session():
     return jsonify({"id": sid, "title": "新对话", "workspace_id": actual_wid})
 
 
+# ============ 项目约定（AGENTS.md）============
+def _workspace_root(workspace_id) -> str | None:
+    if not workspace_id:
+        return None
+    try:
+        ws = db.get_workspace(int(workspace_id))
+    except (TypeError, ValueError):
+        return None
+    return (ws or {}).get("path") if isinstance(ws, dict) else None
+
+
+@app.route("/api/project_context", methods=["GET"])
+def get_project_context():
+    """当前工作区加载到哪些 AGENTS.md、多大、预览。"""
+    import project_context
+
+    root = _workspace_root(request.args.get("workspace_id"))
+    data = project_context.load(root)
+    return jsonify({
+        "ok": True,
+        "workspace_root": root,
+        "target_path": project_context.target_path(root),
+        "sources": data["sources"],
+        "truncated": data["truncated"],
+        "chars": len(data["text"]),
+        "preview": data["text"][:600],
+    })
+
+
+@app.route("/api/project_context", methods=["POST"])
+def save_project_context():
+    """新建 / 覆盖工作区根目录下的 AGENTS.md。
+
+    只允许写在工作区根目录 —— 不提供任意路径写入，避免变成新的越权入口。
+    """
+    import project_context
+
+    root = _workspace_root((request.get_json(silent=True) or {}).get("workspace_id"))
+    if not root or not os.path.isdir(root):
+        return jsonify({"ok": False, "error": "工作区路径不存在"}), 400
+
+    content = (request.get_json(silent=True) or {}).get("content")
+    if not isinstance(content, str):
+        return jsonify({"ok": False, "error": "content 必须是字符串"}), 400
+
+    target = project_context.target_path(root)
+    try:
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(content)
+    except OSError as e:
+        return jsonify({"ok": False, "error": f"写入失败：{e}"}), 500
+
+    data = project_context.load(root)
+    return jsonify({"ok": True, "path": target, "chars": len(data["text"]),
+                    "sources": data["sources"]})
+
+
 # ============ MCP 插件 ============
 def real_tool_names(server_name: str) -> list:
     """该 server 提供的**真实工具**名（不含 resources/prompts 合成出来的）。"""

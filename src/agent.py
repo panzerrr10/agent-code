@@ -1,7 +1,13 @@
 import json
 import secrets
 
-from config import MAX_STEPS
+import compaction
+import project_context
+from config import (
+    CONTEXT_BUDGET_TOKENS,
+    CONTEXT_KEEP_RECENT_TOOL_RESULTS,
+    MAX_STEPS,
+)
 from config_providers import (
     DEFAULT_PROVIDER,
     get_extra_body,
@@ -347,9 +353,29 @@ def run_agent_stream(
     )
     _extra_body = get_extra_body(effective_provider_id)
 
+    # 项目约定（AGENTS.md）：作为**独立的一条 system 消息**插在主提示词之后。
+    # 刻意不拼进 SYSTEM_PROMPT —— 主提示词保持稳定（对 prompt caching 友好），
+    # 调试时也能一眼看出哪段是用户写的。
+    _root = project_root
+    if not _root:
+        try:
+            _root = runtime.get_project_root()
+        except Exception:                                   # noqa: BLE001
+            _root = None
+    _project_ctx = project_context.load(_root)
+    _project_ctx_msg = project_context.build_system_message(_root)
+
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT + memory_context + plan_context}
     ]
+    if _project_ctx_msg:
+        messages.append(_project_ctx_msg)
+        yield {
+            "type": "project_context",
+            "sources": _project_ctx["sources"],
+            "chars": len(_project_ctx["text"]),
+            "truncated": _project_ctx["truncated"],
+        }
 
     # 【消费端】如果 _resume=True 且有 pending state，用保存的 messages 覆盖
     _resumed_from_pending = False
@@ -361,6 +387,13 @@ def run_agent_stream(
             # 【修复 Bug1】用 deepcopy 切断引用，避免后续修改污染 pending_state 里的原始列表
             import copy
             messages = copy.deepcopy(_pending["messages"])
+            # 续跑用的是当初保存的 messages。旧 pending 里可能没有这条
+            # （这次改动之前存的），补上，避免同一次任务前后不一致。
+            if _project_ctx_msg and not any(
+                isinstance(m, dict) and str(m.get("content", "")).startswith("# 本项目的约定")
+                for m in messages
+            ):
+                messages.insert(1, _project_ctx_msg)
             # 兼容旧 pending_state：
             # 如果 assistant 消息带 reasoning_content 但是空/不完整，
             # DeepSeek 会 400。干脆清掉所有空的 reasoning_content 字段，让 API 不校验。
@@ -533,6 +566,31 @@ def run_agent_stream(
                 task=user_task,
                 full=(planner_plan is not None),  # 有 Planner 计划 → 全发
             )
+
+            # ===== 上下文压缩 =====
+            # 在这里做（两步之间的安全边界，没有悬空的 tool_call），
+            # 而且必须在 _persist_pending 之前 —— 存进 pending 的应当是压缩后的版本。
+            # 工具 schema 不在这份 messages 里但每次都要发，所以从预算里扣掉。
+            _overhead = len(
+                json.dumps(selected_tools, ensure_ascii=False)
+            ) // compaction.CHAR_PER_TOKEN
+            _cstats = compaction.compact(
+                messages,
+                budget_tokens=CONTEXT_BUDGET_TOKENS,
+                overhead_tokens=_overhead,
+                keep_recent=CONTEXT_KEEP_RECENT_TOOL_RESULTS,
+            )
+            if _cstats["after_tokens"] < _cstats["before_tokens"]:
+                yield {"type": "context_stats", **_cstats}
+            if not _cstats["pairing_ok"]:
+                # 压缩破坏了 tool_call 配对 —— 发出去必然 400。
+                # 宁可停下来说清楚，也不要甩一个费解的 API 错误给用户。
+                yield {
+                    "type": "error",
+                    "content": "❌ 内部错误：上下文压缩破坏了工具调用配对，已中止本次运行。",
+                }
+                yield {"type": "done"}
+                return
             # DeepSeek 推理模型：调用 LLM 前保证发给 API 的 messages 的
             # reasoning_content 字段内部一致，否则 400
             _ensure_reasoning_consistency(messages)

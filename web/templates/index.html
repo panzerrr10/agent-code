@@ -1975,6 +1975,67 @@
         body.dark .set-hint.warn { background: #2c2410; border-color: #4d3a10; color: #fbbf24; }
         body.dark .set-hint code { background: #232833; }
 
+        /* ===== 项目约定 ===== */
+        .pc-src {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            font-size: 11.5px;
+            padding: 5px 8px;
+            border-radius: 6px;
+            background: #f3f4f6;
+            margin-bottom: 5px;
+        }
+
+        .pc-path {
+            font-family: ui-monospace, Menlo, monospace;
+            color: #3730a3;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .pc-size { color: #6b7280; flex-shrink: 0; }
+
+        .pc-preview {
+            margin: 9px 0 0;
+            padding: 9px 11px;
+            background: #f9fafb;
+            border: 1px solid #eef0f3;
+            border-radius: 7px;
+            font-size: 11px;
+            line-height: 1.65;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 220px;
+            overflow-y: auto;
+            color: #4b5563;
+        }
+
+        .ctx-stats {
+            font-size: 11px;
+            color: #0369a1;
+            background: #f0f9ff;
+            border: 1px solid #bae6fd;
+            border-radius: 6px;
+            padding: 4px 8px;
+            margin-top: 5px;
+            display: inline-block;
+        }
+
+        body.dark .ctx-stats { background: #0c2436; border-color: #1e4a66; color: #7dd3fc; }
+
+        .pc-note {
+            font-size: 11px;
+            color: #6b7280;
+            margin-top: 5px;
+        }
+
+        body.dark .pc-src { background: #232833; }
+        body.dark .pc-path { color: #a5b4fc; }
+        body.dark .pc-preview { background: #1b1f27; border-color: #2a2f3a; color: #9ca3af; }
+
         /* ===== MCP 插件 ===== */
         .mcp-global {
             display: flex;
@@ -2880,6 +2941,22 @@
                 </section>
 
                 <section class="set-sec">
+                    <h4>📋 项目约定（AGENTS.md）</h4>
+                    <p class="set-hint" style="margin: 0 0 8px;">
+                        给 Agent 注入这个项目的约定与背景。支持三个位置（按优先级）：
+                        <code>&lt;工作区&gt;/AGENTS.md</code>、
+                        <code>&lt;工作区&gt;/.agentcode/AGENTS.md</code>、
+                        <code>~/.agentcode/AGENTS.md</code>。项目级在前、用户级在后合并。
+                    </p>
+                    <div id="pcStatus"></div>
+                    <div class="mcp-actions">
+                        <button class="fp-btn primary" id="pcEditBtn" onclick="editProjectContext()">新建 / 编辑</button>
+                        <button class="fp-btn" onclick="loadProjectContext()">↻ 刷新</button>
+                    </div>
+                    <pre id="pcPreview" class="pc-preview" style="display: none;"></pre>
+                </section>
+
+                <section class="set-sec">
                     <h4>🔌 MCP 插件</h4>
                     <label class="mcp-global">
                         <input type="checkbox" id="mcpInjectToggle" onchange="setMcpInject(this.checked)">
@@ -3281,6 +3358,10 @@
                                 lastResultEl = appendToolCall(ctx, ev.name, ev.args);
                                 // 记下本次会写盘的文件，跑完给「下载 / 打开」入口
                                 collectProduced(ctx, ev.name, ev.args);
+                            } else if (ev.type === "context_stats") {
+                                updateContextStats(ctx, ev);
+                            } else if (ev.type === "project_context") {
+                                appendProjectContextNote(ctx, ev);
                             } else if (ev.type === "permission_denied") {
                                 appendPermissionDenied(ctx, ev.content);
                             } else if (ev.type === "tool_result") {
@@ -3506,6 +3587,39 @@
                             title="下载到系统「下载」目录">⬇ 下载</button>
                     </span>`).join("");
             ctx.bubble.parentElement.appendChild(box);
+        }
+
+        /**
+         * 上下文压缩状态。
+         *
+         * **必须让用户看得见** —— 压缩最大的风险是「悄悄剪掉了关键信息」，
+         * 有这个指示器就能一眼确认它在工作、以及压到了什么程度。
+         */
+        function updateContextStats(ctx, ev) {
+            if (!ctx || !ctx.bubble || !ctx.bubble.parentElement) return;
+            let el = ctx.bubble.parentElement.querySelector(".ctx-stats");
+            if (!el) {
+                el = document.createElement("div");
+                el.className = "ctx-stats";
+                ctx.bubble.parentElement.appendChild(el);
+            }
+            const pct = Math.round((ev.after_tokens / ev.budget) * 100);
+            const parts = [`📉 上下文 ${(ev.after_tokens / 1000).toFixed(1)}K / ${(ev.budget / 1000).toFixed(0)}K (${pct}%)`];
+            if (ev.pruned) parts.push("已剪枝旧工具结果");
+            if (ev.folded) parts.push(`已折叠 ${ev.folded} 个步骤`);
+            parts.push(`省下 ${(ev.saved_chars / 1000).toFixed(0)}K 字符`);
+            el.textContent = parts.join(" · ");
+            el.title = `压缩前 ${ev.before_tokens} tokens → 压缩后 ${ev.after_tokens} tokens`;
+        }
+
+        /** 本次运行加载了项目约定时给个小提示（不做成卡片，避免干扰）。 */
+        function appendProjectContextNote(ctx, ev) {
+            if (!ctx || !ctx.bubble || !ctx.bubble.parentElement) return;
+            const names = (ev.sources || []).map(x => x.path.split("/").pop()).join("、");
+            const div = document.createElement("div");
+            div.className = "pc-note";
+            div.textContent = `📋 已加载项目约定：${names || "AGENTS.md"}（${ev.chars} 字符${ev.truncated ? "，已截断" : ""}）`;
+            ctx.bubble.parentElement.appendChild(div);
         }
 
         /** 等级 1 下工具被拒时的提示卡片。 */
@@ -4802,6 +4916,7 @@
         function openSettings() {
             document.getElementById("settingsModal").style.display = "flex";
             renderProviderKeys();
+            loadProjectContext();                  // 项目约定
             loadMcpServers();                      // MCP 插件
             loadDocuments();                       // 知识库列表
             if (!providersData.length) loadProviders();
@@ -4811,6 +4926,84 @@
 
         function closeSettings() {
             document.getElementById("settingsModal").style.display = "none";
+        }
+
+        // ===== 项目约定（AGENTS.md）=====
+        let pcData = null;
+
+        async function loadProjectContext() {
+            const box = document.getElementById("pcStatus");
+            if (!box) return;
+            try {
+                const res = await fetch(`/api/project_context?workspace_id=${currentWorkspaceId || ""}`);
+                pcData = await res.json();
+            } catch (e) {
+                box.innerHTML = `<div class="mcp-err">读取失败：${escapeHtml(e.message)}</div>`;
+                return;
+            }
+            renderProjectContext();
+        }
+
+        function renderProjectContext() {
+            const box = document.getElementById("pcStatus");
+            const pre = document.getElementById("pcPreview");
+            if (!box || !pcData) return;
+            const srcs = pcData.sources || [];
+            if (!srcs.length) {
+                box.innerHTML = `<div class="set-hint">
+                    当前工作区还没有 AGENTS.md。
+                    点「新建 / 编辑」会在 <code>${escapeHtml(pcData.target_path || "")}</code>
+                    建一个模板并在右侧面板打开。</div>`;
+                pre.style.display = "none";
+                return;
+            }
+            box.innerHTML = srcs.map(x => `
+                <div class="pc-src">
+                    <span class="pc-path">${escapeHtml(x.path)}</span>
+                    <span class="pc-size">${x.chars} 字符${x.truncated ? "（已截断）" : ""}</span>
+                </div>`).join("");
+            pre.textContent = (pcData.preview || "") + (pcData.chars > 600 ? "\n…" : "");
+            pre.style.display = "block";
+        }
+
+        /** 新建（写模板）或直接打开已有的 AGENTS.md。 */
+        async function editProjectContext() {
+            if (!currentWorkspaceId) { alert("请先选择一个工作区"); return; }
+            const target = pcData && pcData.target_path;
+            const exists = pcData && (pcData.sources || []).some(
+                x => target && x.path === target);
+            if (!exists) {
+                const tpl = [
+                    "# 项目约定",
+                    "",
+                    "<!-- 这里写的内容会在每次对话时注入给 Agent，请保持简洁。 -->",
+                    "",
+                    "## 这是什么项目",
+                    "",
+                    "## 技术栈与约定",
+                    "",
+                    "- ",
+                    "",
+                    "## 注意事项",
+                    "",
+                    "- ",
+                ].join("\n");
+                try {
+                    const res = await fetch("/api/project_context", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ workspace_id: currentWorkspaceId, content: tpl }),
+                    });
+                    const j = await res.json();
+                    if (!j.ok) { alert(j.error || "创建失败"); return; }
+                    await loadProjectContext();
+                } catch (e) {
+                    alert("创建失败：" + e.message);
+                    return;
+                }
+            }
+            closeSettings();
+            openFile(pcData.target_path);   // 用右侧 CodeMirror 编辑
         }
 
         // ===== MCP 插件 =====
