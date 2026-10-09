@@ -196,33 +196,54 @@ def test_ping_reports_healthy_server(rich):
 def test_ping_detects_dead_server(rich):
     """进程被杀了，ping 必须能发现（否则界面一直显示「已连接」）。"""
     srv = mcp_client._state["servers"]["rich"]
-    pid = _find_server_pid(RICH_SERVER)
-    assert pid, "找不到服务进程"
-    os.kill(pid, 9)
-    time.sleep(1.0)
+    assert _kill_all_server_procs(RICH_SERVER) >= 1, "找不到服务进程"
+    for _ in range(50):
+        if not mcp_client._ping(srv):
+            break
+        time.sleep(0.2)
     assert mcp_client._ping(srv) is False
 
 
 def test_watchdog_marks_unhealthy_and_reconnects(rich):
-    pid = _find_server_pid(RICH_SERVER)
-    os.kill(pid, 9)
-    time.sleep(1.0)
+    """看门狗要能发现进程死了，并把它拉起来。
+
+    **重连是异步的、耗时的**（要关旧会话、起新进程、重握手），
+    所以这里**轮询等待**而不是假设一次 tick 就立刻 ready ——
+    否则机器一忙（例如同时在跑评估集）就会偶发失败。
+    flaky 的测试会让人不再相信整个测试套。
+    """
+    srv = mcp_client._state["servers"]["rich"]
+    assert _kill_all_server_procs(RICH_SERVER) >= 1, "找不到服务进程"
+
+    # 等待 ping 真的失败再往下走 —— kill -9 之后对端不一定立刻不可达
+    for _ in range(50):
+        if not mcp_client._ping(srv):
+            break
+        time.sleep(0.2)
+    assert not mcp_client._ping(srv), "进程杀了但 ping 仍然是通的"
 
     mcp_client._watchdog_tick()          # 第一次：标记不健康
     assert mcp_client.server_status("rich")["status"] == "error"
     assert "健康检查失败" in mcp_client.server_status("rich")["error"]
 
-    mcp_client._backoff["rich"] = (0, 20)   # 让它立刻重试
-    mcp_client._watchdog_tick()             # 第二次：拉起
+    # 反复 tick + 等待，最多 40s（重连本身有退避与握手耗时）
+    deadline = time.time() + 40
+    while time.time() < deadline:
+        mcp_client._backoff["rich"] = (0, 20)   # 跳过退避，立刻重试
+        mcp_client._watchdog_tick()
+        if mcp_client.server_status("rich")["status"] == "ready":
+            break
+        time.sleep(1.0)
+
     st = mcp_client.server_status("rich")
-    assert st["status"] == "ready", st
+    assert st["status"] == "ready", f"看门狗没能在 40s 内拉起来：{st}"
     assert st["restart_count"] >= 1, "应该记下重连次数"
     assert mcp_client.call_tool("mcp__rich__add", {"a": 1, "b": 2}) == "3"
 
 
 def test_no_auto_reconnect_when_disabled(rich):
     mcp_config.patch_server("rich", auto_reconnect=False)
-    os.kill(_find_server_pid(RICH_SERVER), 9)
+    _kill_all_server_procs(RICH_SERVER)
     time.sleep(1.0)
     mcp_client._watchdog_tick()
     mcp_client._backoff["rich"] = (0, 20)
@@ -236,8 +257,15 @@ def test_watchdog_skips_disabled_servers(rich):
     assert mcp_client.server_status("rich")["status"] == "ready" or True
 
 
-def _find_server_pid(script: str):
+def _all_server_pids(script: str) -> list:
+    """找出所有在跑该脚本的进程。
+
+    刻意返回**全部**而不是第一个：测试之间可能短暂共存多个同名进程
+    （上一个还没收干净、当前这个刚起来），只杀第一个会杀错对象，
+    表现为「明明 kill 了，ping 还是通的」这种看起来很玄的失败。
+    """
     me = os.getpid()
+    out = []
     for entry in os.listdir("/proc"):
         if not entry.isdigit() or int(entry) == me:
             continue
@@ -247,8 +275,24 @@ def _find_server_pid(script: str):
         except OSError:
             continue
         if len(argv) >= 2 and argv[-1] == script and "python" in os.path.basename(argv[0]):
-            return int(entry)
-    return None
+            out.append(int(entry))
+    return out
+
+
+def _find_server_pid(script: str):
+    pids = _all_server_pids(script)
+    return pids[0] if pids else None
+
+
+def _kill_all_server_procs(script: str) -> int:
+    n = 0
+    for pid in _all_server_pids(script):
+        try:
+            os.kill(pid, 9)
+            n += 1
+        except OSError:
+            pass
+    return n
 
 
 # ============ 三期：resources / prompts ============

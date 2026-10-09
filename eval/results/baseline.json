@@ -1,0 +1,206 @@
+{
+  "summary": {
+    "tasks": 10,
+    "passed": 10,
+    "pass_rate": 1.0,
+    "total_steps": 58,
+    "avg_steps": 5.8,
+    "total_tokens": 217171,
+    "total_tool_calls": 71,
+    "total_duration_s": 70.2,
+    "compactions": 0
+  },
+  "results": [
+    {
+      "task": "fix_failing_test",
+      "title": "修复导致测试失败的 bug",
+      "tags": [
+        "bugfix",
+        "test-driven"
+      ],
+      "passed": true,
+      "reason": "通过",
+      "steps": 6,
+      "prompt_tokens": 21819,
+      "completion_tokens": 590,
+      "duration_s": 7.5,
+      "tool_calls": 8,
+      "compactions": 0,
+      "error": "",
+      "workdir": "",
+      "diff_stat": " 1 file changed, 1 insertion(+), 1 deletion(-)"
+    },
+    {
+      "task": "fix_off_by_one",
+      "title": "定位并修复越界错误",
+      "tags": [
+        "bugfix",
+        "debugging"
+      ],
+      "passed": true,
+      "reason": "通过",
+      "steps": 6,
+      "prompt_tokens": 21963,
+      "completion_tokens": 708,
+      "duration_s": 8.8,
+      "tool_calls": 7,
+      "compactions": 0,
+      "error": "",
+      "workdir": "",
+      "diff_stat": " 1 file changed, 1 insertion(+), 1 deletion(-)"
+    },
+    {
+      "task": "fix_import_error",
+      "title": "修复导入错误",
+      "tags": [
+        "bugfix",
+        "imports"
+      ],
+      "passed": true,
+      "reason": "通过",
+      "steps": 6,
+      "prompt_tokens": 21023,
+      "completion_tokens": 587,
+      "duration_s": 6.5,
+      "tool_calls": 6,
+      "compactions": 0,
+      "error": "",
+      "workdir": "",
+      "diff_stat": " 1 file changed, 2 insertions(+), 2 deletions(-)"
+    },
+    {
+      "task": "implement_function",
+      "title": "按测试实现函数",
+      "tags": [
+        "feature",
+        "spec-following"
+      ],
+      "passed": true,
+      "reason": "通过",
+      "steps": 5,
+      "prompt_tokens": 17758,
+      "completion_tokens": 570,
+      "duration_s": 5.1,
+      "tool_calls": 6,
+      "compactions": 0,
+      "error": "",
+      "workdir": "",
+      "diff_stat": " 1 file changed, 4 insertions(+), 1 deletion(-)"
+    },
+    {
+      "task": "add_validation",
+      "title": "补输入校验并满足测试",
+      "tags": [
+        "feature",
+        "validation",
+        "spec-following"
+      ],
+      "passed": true,
+      "reason": "通过",
+      "steps": 5,
+      "prompt_tokens": 17783,
+      "completion_tokens": 776,
+      "duration_s": 5.7,
+      "tool_calls": 6,
+      "compactions": 0,
+      "error": "",
+      "workdir": "",
+      "diff_stat": " 1 file changed, 6 insertions(+)"
+    },
+    {
+      "task": "multi_file_rename",
+      "title": "跨文件重命名函数",
+      "tags": [
+        "refactor",
+        "multi-file"
+      ],
+      "passed": true,
+      "reason": "通过",
+      "steps": 5,
+      "prompt_tokens": 18660,
+      "completion_tokens": 708,
+      "duration_s": 5.6,
+      "tool_calls": 9,
+      "compactions": 0,
+      "error": "",
+      "workdir": "",
+      "diff_stat": " 3 files changed, 5 insertions(+), 5 deletions(-)"
+    },
+    {
+      "task": "extract_function",
+      "title": "统一两处不一致的实现",
+      "tags": [
+        "refactor",
+        "consistency"
+      ],
+      "passed": true,
+      "reason": "通过",
+      "steps": 6,
+      "prompt_tokens": 21839,
+      "completion_tokens": 615,
+      "duration_s": 7.4,
+      "tool_calls": 7,
+      "compactions": 0,
+      "error": "",
+      "workdir": "",
+      "diff_stat": " 1 file changed, 6 insertions(+), 4 deletions(-)"
+    },
+    {
+      "task": "fix_three_bugs",
+      "title": "一次修三个独立的 bug",
+      "tags": [
+        "bugfix",
+        "persistence"
+      ],
+      "passed": true,
+      "reason": "通过",
+      "steps": 6,
+      "prompt_tokens": 22887,
+      "completion_tokens": 772,
+      "duration_s": 7.2,
+      "tool_calls": 9,
+      "compactions": 0,
+      "error": "",
+      "workdir": "",
+      "diff_stat": " 3 files changed, 3 insertions(+), 3 deletions(-)"
+    },
+    {
+      "task": "keep_public_api",
+      "title": "修 bug 但不能改公开接口",
+      "tags": [
+        "bugfix",
+        "constraint-following"
+      ],
+      "passed": true,
+      "reason": "通过",
+      "steps": 8,
+      "prompt_tokens": 28286,
+      "completion_tokens": 953,
+      "duration_s": 11.3,
+      "tool_calls": 7,
+      "compactions": 0,
+      "error": "",
+      "workdir": "",
+      "diff_stat": " 1 file changed, 1 insertion(+), 1 deletion(-)"
+    },
+    {
+      "task": "find_bug_in_large_file",
+      "title": "在大文件里定位问题",
+      "tags": [
+        "bugfix",
+        "navigation"
+      ],
+      "passed": true,
+      "reason": "通过",
+      "steps": 5,
+      "prompt_tokens": 18304,
+      "completion_tokens": 570,
+      "duration_s": 5.1,
+      "tool_calls": 6,
+      "compactions": 0,
+      "error": "",
+      "workdir": "",
+      "diff_stat": " 1 file changed, 1 insertion(+), 2 deletions(-)"
+    }
+  ]
+}
