@@ -1,5 +1,6 @@
 import json
 import secrets
+import time
 
 import compaction
 import project_context
@@ -16,6 +17,13 @@ from config_providers import (
 )
 from tools import execute_tool, get_tools_schema, is_privileged_tool
 from utils import call_llm_with_retry, get_llm_client
+
+# 流式文本的发送节流间隔（秒）。
+# 后端本来就是逐 chunk 收的（stream=True），但**收到的一直攒到最后才发一次** ——
+# 用户盯着空白等十几秒，然后整段答案「啪」地出现（实测 7.1 秒 → 一次性 299 字符）。
+# 改成按这个间隔边收边发：50ms ≈ 20 次/秒，肉眼已是连续动画，
+# 又不会把 SSE 刷成几千条事件。
+STREAM_FLUSH_SEC = 0.05
 
 
 def _get_default_client():
@@ -642,6 +650,11 @@ def run_agent_stream(
             tool_calls_buffer = {}  # {index: {...}}
             usage = None
 
+            # 流式增量：把「等整段结束再发一次」改成「边收边发」
+            _pending_text = ""
+            _last_flush = time.monotonic()
+            _streamed_text = False
+
             for chunk in stream:
                 # 取消检查点 2：流式输出过程中（长回答可能持续几十秒）
                 if runtime.is_cancelled():
@@ -664,6 +677,16 @@ def run_agent_stream(
                 delta = chunk.choices[0].delta
                 if delta.content:
                     content_buffer += delta.content
+                    _pending_text += delta.content
+                    _streamed_text = True
+                    _now = time.monotonic()
+                    if _now - _last_flush >= STREAM_FLUSH_SEC:
+                        # **事件类型仍是 text、内容仍是增量。**
+                        # 不新增事件类型是刻意的：「内容只有一个事件源」这条
+                        # 不变量保住了，app.py 的落库累加与前端累加都不用分叉。
+                        yield {"type": "text", "content": _pending_text}
+                        _pending_text = ""
+                        _last_flush = _now
 
                 # 捕获 DeepSeek 推理模型的 reasoning_content
                 if hasattr(delta, "reasoning_content") and delta.reasoning_content:
@@ -689,6 +712,11 @@ def run_agent_stream(
                                 tool_calls_buffer[idx]["function"][
                                     "arguments"
                                 ] += tc.function.arguments
+
+            # 流结束：冲出节流里剩的最后一段，否则最后几十毫秒的内容会丢
+            if _pending_text:
+                yield {"type": "text", "content": _pending_text}
+                _pending_text = ""
 
         except Exception as e:
             err_msg = str(e)
@@ -878,7 +906,10 @@ def run_agent_stream(
             continue
         # 情况 2：给出最终答案
         content = assistant_msg.content or ""
-        yield {"type": "text", "content": content}
+        if not _streamed_text:
+            # 只有「没走过流式」才整段发。已经边收边发过就不能再发 ——
+            # 前端与 app.py 都是 `full += content`，再发一遍答案会出现两次。
+            yield {"type": "text", "content": content}
 
         # 发送 token 统计
         yield {

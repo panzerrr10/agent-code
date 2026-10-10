@@ -3954,8 +3954,8 @@
             // ---- 第三步：在本会话 → 更新界面 ----
             const ctx = run.ctx;
             if (ev.type === "text") {
-                ctx.bubble.innerHTML = DOMPurify.sanitize(marked.parse(run.fullText));
-                followChat();
+                // 增量流式：每段都重解析全文太浪费，交给 rAF 合并到每帧一次
+                scheduleTextRender(run);
 
             } else if (ev.type === "token_usage") {
                 ctx.tokenInfo.innerHTML =
@@ -4042,6 +4042,7 @@
 
             } else if (ev.type === "cancelled") {
                 // 停止：保留已产出的文本，并明确标注是用户主动中断
+                flushTextRender(run);
                 ctx.bubble.innerHTML = DOMPurify.sanitize(marked.parse(run.fullText));
                 const stopTip = document.createElement("div");
                 stopTip.className = "bubble";
@@ -4068,6 +4069,7 @@
                 ctx.bubble.textContent = "⚠️ " + ev.content;
 
             } else if (ev.type === "done") {
+                flushTextRender(run);      // rAF 可能还没触发，补最后一次
                 finalizeExecList(ctx);
                 finishRoundCard(ctx, run.sessionId);
             }
@@ -4101,6 +4103,29 @@
                     }
                 }
             }
+        }
+
+        /**
+         * 把流式文本的重渲染合并到「每帧一次」。
+         *
+         * 后端现在约每 50ms 发一段增量。每段都做一次 `marked.parse(全文)` +
+         * `DOMPurify.sanitize` + 整体替换 innerHTML 是浪费 —— 一帧内来几段
+         * 也只需渲染最后一次。用 rAF 合并，长回答下能省掉大部分解析。
+         */
+        function scheduleTextRender(run) {
+            if (run._rafPending) return;
+            run._rafPending = true;
+            requestAnimationFrame(() => {
+                run._rafPending = false;
+                flushTextRender(run, true);
+            });
+        }
+
+        /** 真正渲染。``follow`` 为真时顺带处理滚动跟随。 */
+        function flushTextRender(run, follow) {
+            if (!run.isActive() || !run.ctx || !run.ctx.bubble) return;
+            run.ctx.bubble.innerHTML = DOMPurify.sanitize(marked.parse(run.fullText));
+            if (follow) followChat();
         }
 
         /** 构造一次运行的上下文，供 consumeSseStream 用。 */
