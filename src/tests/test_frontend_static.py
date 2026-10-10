@@ -382,3 +382,35 @@ def test_no_assignment_to_undeclared_variable():
         "这些变量被赋值但从未声明（会变成隐式全局，且 strict mode 下直接报错）：\n  "
         + "\n  ".join(missing)
     )
+
+
+def test_css_braces_are_balanced():
+    """CSS 大括号必须配对。
+
+    样式块写坏（少一个 `}`）不会让页面报错，而是**后面所有规则静默失效** ——
+    表现成「改了样式但没生效」，极难定位。这次追加了一整块设计尺度，
+    值得加一条兜底。
+    """
+    with open(INDEX, encoding="utf-8") as f:
+        html = f.read()
+    blocks = re.findall(r"<style[^>]*>(.*?)</style>", html, re.S)
+    assert blocks, "没找到 <style> 块"
+    for i, css in enumerate(blocks):
+        # 去掉注释再数，注释里的 { } 不算
+        stripped = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+        assert stripped.count("{") == stripped.count("}"), (
+            f"第 {i+1} 个 <style> 块括号不配对："
+            f"{{ × {stripped.count('{')}，}} × {stripped.count('}')}"
+        )
+
+
+def test_design_tokens_are_defined():
+    """设计尺度必须存在 —— 它是「统一按钮/间距/圆角」的唯一来源。
+
+    如果哪天有人把它删了，样式不会报错，但按钮会悄悄退回各写各的状态。
+    """
+    with open(INDEX, encoding="utf-8") as f:
+        html = f.read()
+    for token in ("--sp-1", "--r-md", "--fs-md", "--accent", "--shadow-1", "--bg-header"):
+        assert f"{token}:" in html, f"设计尺度里缺少 {token}"
+    assert "body.dark {" in html, "缺少暗色模式的 token 覆盖"

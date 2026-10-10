@@ -3238,6 +3238,285 @@
         body.dark .fp-btn:hover:not(:disabled) {
             background: #2b313d;
         }
+        /* ============================================================
+           设计尺度（Design tokens）
+           ------------------------------------------------------------
+           这里集中定义「尺度」并覆盖前面的散点样式。放在最后是刻意的：
+           级联顺序保证生效，且整块可以一次性回滚，不用去 3000 行里翻散点。
+
+           原来的问题：
+             · 紫色渐变头把视觉权重全吃了 —— 它只是个标题栏
+             · 字号/间距/圆角全是散落的字面量（9px / 11px / 12px 混用）
+             · 14 种按钮类各写各的，同一个界面里按钮高矮圆角不一致
+             · 消息气泡偏松，一屏看不了几条
+           ============================================================ */
+        :root {
+            /* 间距阶 */
+            --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px; --sp-5: 24px;
+            /* 圆角阶 */
+            --r-sm: 4px;  --r-md: 6px;  --r-lg: 9px;  --r-pill: 999px;
+            /* 字号阶 */
+            --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-lg: 14px; --fs-xl: 17px;
+            /* 阴影 */
+            --shadow-1: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .08);
+            --shadow-2: 0 4px 14px rgba(16, 24, 40, .10);
+            /* 语义色 */
+            --accent: #4f46e5;
+            --accent-hover: #4338ca;
+            --accent-soft: #eef2ff;
+            --accent-border: #c7d2fe;
+            --ok: #15803d;
+            --warn: #b45309;
+            --danger: #b91c1c;
+            /* 头部：中性深色，让内容抢视觉 */
+            --bg-header: linear-gradient(180deg, #232b3d, #1b2231);
+            --text-header: #e8ecf4;
+            --text-header-sub: #98a3b8;
+            --border-strong: #d6dbe3;
+            --bg-sidebar: #f7f8fa;
+        }
+
+        body.dark {
+            --bg-header: linear-gradient(180deg, #161c28, #12171f);
+            --text-header: #e8ecf4;
+            --text-header-sub: #7c8798;
+            --accent: #6366f1;
+            --accent-hover: #818cf8;
+            --accent-soft: #252b45;
+            --accent-border: #3b4270;
+            --border-strong: #3a4252;
+            --bg-sidebar: #1a1f2b;
+            --shadow-1: 0 1px 2px rgba(0, 0, 0, .35);
+            --shadow-2: 0 4px 14px rgba(0, 0, 0, .45);
+        }
+
+        /* ---------- 头部：去紫，中性深色 ---------- */
+        .header {
+            padding: 11px 20px;
+            background: var(--bg-header);
+            color: var(--text-header);
+            box-shadow: var(--shadow-1);
+        }
+
+        .header h1 { font-size: var(--fs-xl); letter-spacing: .2px; }
+        .header .sub { color: var(--text-header-sub); font-size: var(--fs-xs); }
+
+        /* 顶栏图标按钮在深色头上要反过来配色 */
+        .header .icon-btn {
+            background: rgba(255, 255, 255, .09);
+            border: 1px solid rgba(255, 255, 255, .12);
+            color: var(--text-header);
+        }
+
+        .header .icon-btn:hover { background: rgba(255, 255, 255, .18); }
+
+        .header .mode-switch {
+            background: rgba(255, 255, 255, .09);
+            border: 1px solid rgba(255, 255, 255, .12);
+        }
+
+        .header .mode-btn { color: #b9c2d4; }
+        .header .mode-btn.active { background: var(--accent); color: #fff; }
+
+        /* ---------- 侧边栏：中性、更紧凑 ---------- */
+        .sidebar {
+            width: 216px;
+            background: var(--bg-sidebar);
+            border-right: 1px solid var(--border-main);
+        }
+
+        .new-chat-btn {
+            margin: var(--sp-3) var(--sp-3) var(--sp-2);
+            padding: 8px 12px;
+            background: var(--accent);
+            border-radius: var(--r-md);
+            font-size: var(--fs-md);
+            font-weight: 500;
+            transition: background .15s;
+        }
+
+        .new-chat-btn:hover { background: var(--accent-hover); }
+
+        .session-item {
+            padding: 6px 10px;
+            border-radius: var(--r-md);
+            font-size: var(--fs-md);
+            margin: 1px 6px;
+        }
+
+        .session-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+        /* ---------- 消息区：提高信息密度 ---------- */
+        .chat { padding: var(--sp-4) 22px; gap: 10px; }
+
+        .bubble {
+            padding: 9px 13px;
+            border-radius: var(--r-lg);
+            font-size: var(--fs-lg);
+            line-height: 1.65;
+        }
+
+        /* 用户气泡改成纯色：渐变在大面积上显得廉价，也更容易和内容抢注意力 */
+        .msg.user .bubble {
+            background: var(--accent);
+            border-radius: var(--r-lg) var(--r-lg) var(--r-sm) var(--r-lg);
+            box-shadow: var(--shadow-1);
+        }
+
+        .msg.assistant .bubble {
+            border-radius: var(--r-lg) var(--r-lg) var(--r-lg) var(--r-sm);
+            box-shadow: var(--shadow-1);
+        }
+
+        /* 助手气泡在宽屏下别拉太长，一行 100+ 字符很难读 */
+        .msg.assistant .bubble { max-width: 78ch; }
+
+        .msg .bubble pre { border-radius: var(--r-md); font-size: var(--fs-sm); }
+        .msg .bubble code { border-radius: var(--r-sm); }
+
+        /* ---------- 按钮：一套尺寸，只让颜色不同 ---------- */
+        /* 原来 14 种按钮类各写各的高矮圆角，同一个界面里都不一致。
+           这里统一基准尺寸，各类只覆盖颜色。 */
+        .fp-btn, .trash-btn, .icon-btn, .icon-btn-mini, .confirm-btn,
+        .msg-action-btn, .perm-btn, .role-picker-btn, .mode-btn, .round-btn,
+        .new-chat-btn, .settings-btn, .exec-fbtn {
+            border-radius: var(--r-md);
+            font-size: var(--fs-sm);
+            transition: background .15s, border-color .15s, color .15s;
+        }
+
+        .fp-btn {
+            padding: 5px 11px;
+            border: 1px solid var(--border-input);
+            background: var(--bg-app);
+            color: var(--text-main);
+        }
+
+        .fp-btn:hover { background: var(--bg-hover); border-color: var(--border-strong); }
+
+        .fp-btn.primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+            font-weight: 500;
+        }
+
+        .fp-btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+        .fp-btn.danger { color: var(--danger); border-color: #f1c9c9; background: #fff; }
+        .fp-btn.danger:hover { background: #fef2f2; }
+
+        body.dark .fp-btn { background: #232833; border-color: #333a47; color: #d5dbe6; }
+        body.dark .fp-btn:hover { background: #2b3140; }
+        body.dark .fp-btn.danger { background: #2a1e1e; border-color: #5b2b2b; color: #f87171; }
+
+        /* ---------- 输入区 ---------- */
+        .input-area { padding: 10px 22px 14px; }
+
+        #task, .composer textarea {
+            border-radius: var(--r-lg);
+            font-size: var(--fs-lg);
+            line-height: 1.6;
+        }
+
+        #task:focus, .composer textarea:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, .12);
+        }
+
+        .send-btn, .run-btn {
+            border-radius: var(--r-md);
+            background: var(--accent);
+            font-weight: 500;
+        }
+
+        .send-btn:hover, .run-btn:hover { background: var(--accent-hover); }
+
+        /* ---------- 焦点可见（键盘用户） ---------- */
+        :focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 1px;
+        }
+
+        /* ---------- 滚动条：细一点，别抢戏 ---------- */
+        .chat::-webkit-scrollbar, .session-list::-webkit-scrollbar,
+        .exec-list::-webkit-scrollbar, .round-list::-webkit-scrollbar,
+        .fp-diff::-webkit-scrollbar { width: 9px; height: 9px; }
+
+        .chat::-webkit-scrollbar-thumb, .session-list::-webkit-scrollbar-thumb,
+        .exec-list::-webkit-scrollbar-thumb, .round-list::-webkit-scrollbar-thumb,
+        .fp-diff::-webkit-scrollbar-thumb {
+            background: rgba(127, 137, 155, .32);
+            border-radius: var(--r-pill);
+            border: 2px solid transparent;
+            background-clip: content-box;
+        }
+
+        .chat::-webkit-scrollbar-thumb:hover, .session-list::-webkit-scrollbar-thumb:hover {
+            background: rgba(127, 137, 155, .55);
+            background-clip: content-box;
+        }
+
+        /* ---------- 执行/停止按钮：去渐变，统一尺寸 ---------- */
+        #runBtn {
+            padding: 9px 22px;
+            background: var(--accent);
+            border-radius: var(--r-md);
+            font-size: var(--fs-lg);
+            font-weight: 500;
+            transition: background .15s;
+        }
+
+        #runBtn:hover:not(:disabled) { background: var(--accent-hover); }
+
+        #stopBtn {
+            padding: 9px 16px;
+            background: #dc2626;
+            border-radius: var(--r-md);
+            font-size: var(--fs-lg);
+            font-weight: 500;
+        }
+
+        /* ---------- 权限切换：更像一个分段控件 ---------- */
+        .perm-switch {
+            background: var(--bg-hover);
+            border-radius: var(--r-md);
+            padding: 2px;
+        }
+
+        .perm-btn {
+            padding: 3px 9px;
+            border-radius: var(--r-sm);
+            font-size: var(--fs-xs);
+            color: var(--text-sub);
+            border: none;
+            background: transparent;
+        }
+
+        .perm-btn.active {
+            background: var(--bg-app);
+            color: var(--text-main);
+            font-weight: 600;
+            box-shadow: var(--shadow-1);
+        }
+
+        .perm-btn[data-level="3"].active { background: #f59e0b; color: #fff; }
+        .perm-btn[data-level="1"].active { background: #64748b; color: #fff; }
+
+        /* ---------- MCP 表单按钮 ---------- */
+        .mcp-form-btns, .mcp-row-btns { display: flex; gap: var(--sp-2); }
+
+        .mcp-form-btns button, .mcp-row-btns button {
+            border-radius: var(--r-md);
+            font-size: var(--fs-sm);
+            padding: 5px 11px;
+        }
+
+        /* ---------- 补几个暗色下漏掉的地方 ---------- */
+        body.dark .chat { background: var(--bg-chat); }
+        body.dark .msg.assistant .bubble { background: #232937; border-color: #2f3646; }
+        body.dark .bubble code { background: rgba(255, 255, 255, .1); }
+
     </style>
 </head>
 
