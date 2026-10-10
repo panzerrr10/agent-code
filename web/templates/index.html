@@ -2044,6 +2044,57 @@
         body.dark .set-hint.warn { background: #2c2410; border-color: #4d3a10; color: #fbbf24; }
         body.dark .set-hint code { background: #232833; }
 
+        /* ===== 会话搜索与列表元信息 ===== */
+        .session-search { padding: 0 8px 6px; }
+
+        .session-search input {
+            width: 100%;
+            padding: 5px 9px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            font-size: 12px;
+            background: #fff;
+            box-sizing: border-box;
+        }
+
+        .session-search input:focus {
+            outline: none;
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, .12);
+        }
+
+        .session-meta {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            margin-left: auto;
+            padding-left: 6px;
+            flex-shrink: 0;
+            font-size: 10.5px;
+            color: #9ca3af;
+        }
+
+        .session-count { opacity: .8; }
+
+        .session-empty {
+            padding: 14px 10px;
+            font-size: 12px;
+            color: #9ca3af;
+            text-align: center;
+        }
+
+        /* 键盘焦点要看得见（原来只有 div，没有焦点态） */
+        .session-item:focus-visible,
+        .round-head:focus-visible,
+        .model-item:focus-visible {
+            outline: 2px solid #6366f1;
+            outline-offset: -2px;
+        }
+
+        body.dark .session-search input {
+            background: #232833; border-color: #333a47; color: #e5e7eb;
+        }
+
         /* ===== 模型提供商管理 ===== */
         .prov-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 
@@ -3090,10 +3141,13 @@
                     <button class="mode-btn" data-mode="multi" onclick="setMode('multi')">多 Agent</button>
                 </div>
                 <button class="icon-btn" id="filePanelBtn" onclick="toggleFilePanel()"
-                    title="显示/隐藏文件面板 (Ctrl+B)">📄</button>
-                <button class="icon-btn" id="themeBtn" onclick="toggleTheme()" title="切换主题">🌙</button>
+                    title="显示/隐藏文件面板 (Ctrl+B)"
+                    aria-label="显示或隐藏文件面板">📄</button>
+                <button class="icon-btn" id="themeBtn" onclick="toggleTheme()" title="切换主题"
+                        aria-label="切换深色/浅色主题">🌙</button>
                 <div class="dropdown">
-                    <button class="icon-btn" onclick="toggleExportMenu(event)" title="导出">📥</button>
+                    <button class="icon-btn" onclick="toggleExportMenu(event)" title="导出"
+                            aria-label="导出当前会话">📥</button>
                     <div class="dropdown-menu" id="exportMenu" style="display:none;">
                         <a onclick="exportAs('md')">📄 Markdown (.md)</a>
                         <a onclick="exportAs('json')">📋 JSON (.json)</a>
@@ -3112,7 +3166,7 @@
                         <span class="ws-badge">📁</span>
                         <span class="ws-text">
                             <span class="ws-name" id="wsCurrentName">加载中…</span>
-                            <span class="ws-path" id="wsCurrentPath"></span>
+                            <span class="ws-path" id="wsCurrentPath" title=""></span>
                         </span>
                         <span class="ws-caret">▾</span>
                     </button>
@@ -3120,6 +3174,10 @@
                 </div>
 
                 <button class="new-chat-btn" onclick="createNewSession()" id="newChatBtn">+ 新对话</button>
+                <div class="session-search" style="display: none;">
+                    <input type="search" id="sessionSearch" placeholder="搜索会话…"
+                           aria-label="搜索会话" oninput="onSessionSearch(this.value)">
+                </div>
                 <div class="session-list" id="sessionList"></div>
 
                 <!-- 回收站入口 -->
@@ -3187,7 +3245,9 @@
                         accept="image/*,.txt,.md,.markdown,.rst,.log,.csv,.tsv,.json,.yaml,.yml,.toml,.ini,.cfg,.conf,.xml,.html,.htm,.css,.scss,.js,.mjs,.cjs,.ts,.tsx,.jsx,.py,.rb,.go,.rs,.java,.kt,.c,.h,.cpp,.hpp,.cs,.php,.sh,.bash,.zsh,.sql,.pdf,.docx"
                         onchange="handleAttachFiles(this.files)">
                     <div class="composer" id="composer">
-                        <textarea id="task" placeholder="..."></textarea>
+                        <textarea id="task"
+                            placeholder="描述你的任务…  Enter 发送 · Shift+Enter 换行 · 可直接拖入文件"
+                            aria-label="任务输入框"></textarea>
                         <div class="composer-bar">
                             <!-- 左下角：会话权限等级 -->
                             <div class="perm-switch" id="permSwitch" title="权限等级（按会话生效）">
@@ -4270,7 +4330,9 @@
                     </div>`;
                 }).join("");
                 box.innerHTML = `
-                    <div class="round-head" onclick="toggleRoundCard(this)">
+                    <div class="round-head" onclick="toggleRoundCard(this)"
+                         tabindex="0" role="button" aria-label="展开或收起本轮改动"
+                         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleRoundCard(this);}">
                         <span class="round-arrow">▸</span>
                         <span class="round-title">📝 第 ${runIndex} 轮改动</span>
                         <span class="round-meta">${files.length} 个文件 · +${j.added} −${j.removed}</span>
@@ -4452,7 +4514,12 @@
                 return;
             }
             nameEl.textContent = ws.name;
-            pathEl.textContent = ws.exists ? ws.path : ws.path + "  ⚠️ 不存在";
+            // 侧边栏很窄，完整路径一定会被截断成「/home/pz/PycharmProje...」。
+            // 显示末级目录名更认得出来，完整路径放 title 悬停可见。
+            const segs = String(ws.path || "").split("/").filter(Boolean);
+            const short = segs.length ? segs[segs.length - 1] : ws.path;
+            pathEl.textContent = ws.exists ? short : short + "  ⚠️ 不存在";
+            pathEl.title = ws.exists ? ws.path : ws.path + "（不存在）";
             if (newBtn) newBtn.textContent = `+ 在「${ws.name}」新建会话`;
         }
 
@@ -4776,16 +4843,78 @@
             }
         });
 
+        /** SQLite 的 "YYYY-MM-DD HH:MM:SS" 是 **UTC**，转成本地时间再显示。 */
+        function parseServerTime(str) {
+            if (!str) return null;
+            const d = new Date(String(str).replace(" ", "T") + "Z");
+            return isNaN(d.getTime()) ? null : d;
+        }
+
+        /** 人类友好的相对时间：刚刚 / 12 分钟前 / 3 小时前 / 昨天 / 10-08。 */
+        function relTime(str) {
+            const d = parseServerTime(str);
+            if (!d) return "";
+            const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+            if (mins < 1) return "刚刚";
+            if (mins < 60) return `${mins} 分钟前`;
+            const hours = Math.floor(mins / 60);
+            if (hours < 24 && d.toDateString() === new Date().toDateString()) {
+                return `${hours} 小时前`;
+            }
+            const y = new Date(Date.now() - 86400000);
+            if (d.toDateString() === y.toDateString()) return "昨天";
+            return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        }
+
+        let sessionFilter = "";      // 会话搜索关键字
+        let allSessions = [];        // 未过滤的原始列表
+
+        function onSessionSearch(v) {
+            sessionFilter = (v || "").trim().toLowerCase();
+            renderSessionList(allSessions);
+        }
+
         function renderSessionList(sessions) {
+            allSessions = sessions || [];
             const list = document.getElementById("sessionList");
+            if (!list) return;
+
+            const shown = sessionFilter
+                ? allSessions.filter(s => String(s.title || "").toLowerCase().includes(sessionFilter))
+                : allSessions;
+
+            // 搜索框只在会话够多时才占地方
+            const searchBox = document.getElementById("sessionSearch");
+            if (searchBox) {
+                searchBox.parentElement.style.display = allSessions.length >= 8 ? "block" : "none";
+            }
+
             list.innerHTML = "";
-            sessions.forEach(s => {
+            if (!shown.length) {
+                const empty = document.createElement("div");
+                empty.className = "session-empty";
+                empty.textContent = sessionFilter
+                    ? `没有匹配「${sessionFilter}」的会话`
+                    : "还没有会话";
+                list.appendChild(empty);
+                return;
+            }
+
+            shown.forEach(s => {
                 const div = document.createElement("div");
                 div.className = "session-item";
                 div.dataset.id = s.id;
+                div.tabIndex = 0;                       // 键盘可达
+                div.setAttribute("role", "button");
+                const n = Number(s.message_count || 0);
                 div.innerHTML = `
                     <span class="session-title" title="${escapeHtml(s.title)}">${escapeHtml(s.title)}</span>
-                    <button class="session-delete" title="删除">✕</button>
+                    <span class="session-meta">
+                        <span class="session-time">${relTime(s.updated_at)}</span>
+                        ${n ? `<span class="session-count">${n} 条</span>` : ""}
+                    </span>
+                    <button class="session-delete" title="删除这个会话"
+                            aria-label="删除会话 ${escapeHtml(s.title)}">✕</button>
                 `;
                 // 运行中标记
                 if (sessionStates[s.id] && sessionStates[s.id].status === "running") {
@@ -4798,6 +4927,12 @@
                 div.addEventListener("click", (e) => {
                     if (e.target.classList.contains("session-delete")) return;
                     switchSession(s.id);
+                });
+                div.addEventListener("keydown", (e) => {     // 键盘可达
+                    if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        switchSession(s.id);
+                    }
                 });
                 div.querySelector(".session-delete").addEventListener("click", async (e) => {
                     e.stopPropagation();
@@ -6589,7 +6724,16 @@
                 const iconEl = document.getElementById(t.icon);
                 const labelEl = document.getElementById(t.label);
                 if (iconEl) iconEl.textContent = p.icon;
-                if (labelEl) labelEl.textContent = p.name + " · " + currentModelName;
+                if (labelEl) {
+                    // 空间不够时 `DeepSeek · deepseek-chat` 会被截成
+                    // 「DeepSeek · dee...」，认不出是哪个模型。
+                    // 窄的时候只留模型名（用户关心的是模型，不是厂商），
+                    // 全名放 title，鼠标悬停能看到。
+                    labelEl.textContent = currentModelName || p.name;
+                    const full = `${p.name} · ${currentModelName}`;
+                    labelEl.title = full;
+                    if (iconEl) iconEl.title = full;
+                }
             });
         }
 
@@ -6747,7 +6891,10 @@
                     const disabledClass = p.has_key ? "" : "disabled";
                     const onclick = p.has_key ? `selectRoleModel('${role}', '${p.id}', '${m}')` : "";
                     return `
-                        <div class="model-item ${isActive ? 'active' : ''} ${disabledClass}" onclick="${onclick}">
+                        <div class="model-item ${isActive ? 'active' : ''} ${disabledClass}"
+                             onclick="${onclick}" tabindex="${p.has_key ? 0 : -1}" role="option"
+                             aria-selected="${isActive}"
+                             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">
                             <span>${m}${isDefault ? '<span class="default-tag">默认</span>' : ''}</span>
                         </div>
                     `;
@@ -7486,7 +7633,7 @@
     </script>
 
     <!-- 图片放大 Lightbox -->
-    <div id="imgLightbox" onclick="closeLightbox(event)">
+    <div id="imgLightbox" onclick="closeLightbox(event)" role="dialog" aria-label="图片预览">
         <img id="imgLightboxSrc" src="" alt="放大预览">
     </div>
 </body>

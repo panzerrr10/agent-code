@@ -222,15 +222,19 @@ def get_all_sessions(workspace_id: int | None = None):
     """获取会话，按更新时间倒序；给 workspace_id 时只返回该工作区的。"""
     conn = _connect()
     cursor = conn.cursor()
+    # message_count 给侧边栏显示用（会话列表里一眼看出哪些是空壳）。
+    # 用相关子查询而不是 JOIN + GROUP BY：sessions 只有几十条，
+    # 而 JOIN 写法在 messages 大表上反而要全表分组。
+    _cols = (
+        "s.id, s.title, s.created_at, s.updated_at, s.workspace_id, s.permission_level, "
+        "(SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) AS message_count "
+    )
     if workspace_id is None:
-        cursor.execute(
-            "SELECT id, title, created_at, updated_at, workspace_id, permission_level "
-            "FROM sessions ORDER BY updated_at DESC"
-        )
+        cursor.execute(f"SELECT {_cols} FROM sessions s ORDER BY s.updated_at DESC")
     else:
         cursor.execute(
-            "SELECT id, title, created_at, updated_at, workspace_id, permission_level "
-            "FROM sessions WHERE workspace_id = ? ORDER BY updated_at DESC",
+            f"SELECT {_cols} FROM sessions s WHERE s.workspace_id = ? "
+            "ORDER BY s.updated_at DESC",
             (workspace_id,),
         )
     rows = cursor.fetchall()
@@ -243,6 +247,7 @@ def get_all_sessions(workspace_id: int | None = None):
             "updated_at": r[3],
             "workspace_id": r[4],
             "permission_level": r[5],
+            "message_count": r[6] or 0,
         }
         for r in rows
     ]

@@ -369,3 +369,21 @@ def test_backup_does_not_leak_into_api(client):
     _add(client, id="one", name="改过")
     blob = client.get("/api/providers").get_data(as_text=True)
     assert SECRET not in blob
+
+
+# ============ 会话列表元信息 ============
+
+
+def test_session_list_includes_message_count(client):
+    """侧边栏要显示会话有多少条消息，空壳会话一眼看得出来。"""
+    ws = client.post("/workspaces", json={"name": "w",
+                                          "path": os.path.expanduser("~")}).get_json()
+    a = client.post("/sessions", json={"workspace_id": ws["id"]}).get_json()["id"]
+    b = client.post("/sessions", json={"workspace_id": ws["id"]}).get_json()["id"]
+    db.save_message(a, "user", "hi")
+    db.save_message(a, "assistant", "yo")
+
+    rows = {s["id"]: s for s in client.get(f"/sessions?workspace_id={ws['id']}").get_json()}
+    assert rows[a]["message_count"] == 2
+    assert rows[b]["message_count"] == 0, "空会话应该是 0 而不是缺字段"
+    assert rows[a]["updated_at"], "排序与相对时间都要用 updated_at"
