@@ -3268,18 +3268,18 @@
             --ok: #15803d;
             --warn: #b45309;
             --danger: #b91c1c;
-            /* 头部：中性深色，让内容抢视觉 */
-            --bg-header: linear-gradient(180deg, #232b3d, #1b2231);
-            --text-header: #e8ecf4;
-            --text-header-sub: #98a3b8;
+            /* 头部跟随主题：白天白底黑字，黑夜近黑底白字 */
+            --bg-header: #ffffff;
+            --text-header: #111827;
+            --text-header-sub: #6b7280;
             --border-strong: #d6dbe3;
             --bg-sidebar: #f7f8fa;
         }
 
         body.dark {
-            --bg-header: linear-gradient(180deg, #161c28, #12171f);
-            --text-header: #e8ecf4;
-            --text-header-sub: #7c8798;
+            --bg-header: #111419;
+            --text-header: #e8ecf2;
+            --text-header-sub: #8b95a5;
             --accent: #6366f1;
             --accent-hover: #818cf8;
             --accent-soft: #252b45;
@@ -3290,33 +3290,35 @@
             --shadow-2: 0 4px 14px rgba(0, 0, 0, .45);
         }
 
-        /* ---------- 头部：去紫，中性深色 ---------- */
+        /* ---------- 头部：中性，跟随主题 ---------- */
         .header {
             padding: 11px 20px;
             background: var(--bg-header);
             color: var(--text-header);
-            box-shadow: var(--shadow-1);
+            border-bottom: 1px solid var(--border-main);
+            box-shadow: none;
         }
 
-        .header h1 { font-size: var(--fs-xl); letter-spacing: .2px; }
+        .header h1 { font-size: var(--fs-xl); letter-spacing: .2px; color: var(--text-header); }
         .header .sub { color: var(--text-header-sub); font-size: var(--fs-xs); }
 
-        /* 顶栏图标按钮在深色头上要反过来配色 */
+        /* 顶栏控件用 token，白天黑夜都成立 */
         .header .icon-btn {
-            background: rgba(255, 255, 255, .09);
-            border: 1px solid rgba(255, 255, 255, .12);
-            color: var(--text-header);
+            background: var(--bg-surface-3);
+            border: 1px solid var(--border-main);
+            color: var(--text-main);
         }
 
-        .header .icon-btn:hover { background: rgba(255, 255, 255, .18); }
+        .header .icon-btn:hover { background: var(--bg-hover-soft); }
 
         .header .mode-switch {
-            background: rgba(255, 255, 255, .09);
-            border: 1px solid rgba(255, 255, 255, .12);
+            background: var(--bg-surface-3);
+            border: 1px solid var(--border-main);
         }
 
-        .header .mode-btn { color: #b9c2d4; }
+        .header .mode-btn { color: var(--text-sub); }
         .header .mode-btn.active { background: var(--accent); color: #fff; }
+        .header .mode-btn:hover:not(.active) { background: var(--bg-hover-soft); }
 
         /* ---------- 侧边栏：中性、更紧凑 ---------- */
         .sidebar {
@@ -3344,7 +3346,11 @@
             margin: 1px 6px;
         }
 
-        .session-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+        .session-item.active {
+            background: var(--accent-soft);
+            color: var(--accent-text);
+            font-weight: 600;
+        }
 
         /* ---------- 消息区：提高信息密度 ---------- */
         .chat { padding: var(--sp-4) 22px; gap: 10px; }
@@ -3516,6 +3522,295 @@
         body.dark .chat { background: var(--bg-chat); }
         body.dark .msg.assistant .bubble { background: #232937; border-color: #2f3646; }
         body.dark .bubble code { background: rgba(255, 255, 255, .1); }
+
+        /* ============================================================
+           主题：亮 / 暗 两套完整配色
+           ------------------------------------------------------------
+           审计发现 39 处「写死了浅色、但没有暗色对应」的地方 ——
+           最明显的是**项目树面板在暗色下依然是白底**，还有各种 hover 态、
+           浅底徽标、语义提示块。这里补齐成一套语义 token。
+
+           白天：整体白底、字近黑
+           黑夜：整体近黑底、字近白
+           光标：**两种模式用同一种淡灰**（要求如此，也确实更合适 ——
+                 白底上纯黑光标太扎眼，黑底上纯白光标更扎眼，
+                 中间调的灰在两边都清楚、且不抢注意力）
+           ============================================================ */
+        :root {
+            /* 表面层级 */
+            --bg-surface: #ffffff;
+            --bg-surface-2: #f7f8fa;
+            --bg-surface-3: #f1f3f7;
+            --bg-hover-soft: #f1f3f7;
+            --bg-selected: #eef2ff;
+            --border-soft: #e8ebf0;
+            --border-strong: #d6dbe3;
+            /* 语义（浅底 + 深字） */
+            --accent-text: #4f46e5;   /* 文字用的强调色（深色下要更亮才够对比） */
+            --bg-info: #eef2ff;   --fg-info: #3730a3;
+            --bg-ok: #dcfce7;     --fg-ok: #166534;
+            --bg-warn: #fef3c7;   --fg-warn: #92400e;
+            --bg-danger: #fee2e2; --fg-danger: #991b1b;
+            /* 光标：两种模式同一个淡灰 */
+            --caret: #9ca3af;
+
+            /* 白天：整体白、字近黑 */
+            --bg-page: #ffffff;
+            --bg-app: #ffffff;
+            --bg-chat: #ffffff;
+            --bg-bubble-ai: #ffffff;
+            --bg-bubble-user: #4f46e5;
+            --bg-input: #ffffff;
+            --bg-sidebar: #f7f8fa;
+            --bg-hover: #f1f3f7;
+            --text-main: #111827;
+            --text-sub: #6b7280;
+            --border-main: #e8ebf0;
+            --border-input: #d8dde5;
+        }
+
+        body.dark {
+            --bg-surface: #171b22;
+            --bg-surface-2: #14181e;
+            --bg-surface-3: #1d222b;
+            --bg-hover-soft: #222833;
+            --bg-selected: #2a3050;
+            --border-soft: #2b313c;
+            --border-strong: #3a4250;
+            --accent-text: #a5b4fc;
+            --bg-info: #212842;   --fg-info: #a5b4fc;
+            --bg-ok: #13301f;     --fg-ok: #6ee7b7;
+            --bg-warn: #33270e;   --fg-warn: #fcd34d;
+            --bg-danger: #341a1a; --fg-danger: #fca5a5;
+            --caret: #9ca3af;     /* 与白天同一个灰 */
+
+            /* 黑夜：整体近黑、字近白 */
+            --bg-page: #0d0f13;
+            --bg-app: #0d0f13;
+            --bg-chat: #0d0f13;
+            --bg-bubble-ai: #171b22;
+            --bg-bubble-user: #4f46e5;
+            --bg-input: #171b22;
+            --bg-sidebar: #111419;
+            --bg-hover: #1c2129;
+            --text-main: #e8ecf2;
+            --text-sub: #8b95a5;
+            --border-main: #232833;
+            --border-input: #333a47;
+        }
+
+        /* ---------- 光标：输入框、文本域、可编辑区统一 ---------- */
+        input, textarea, [contenteditable="true"], .cm-content, .cm-line {
+            caret-color: var(--caret);
+        }
+
+        /* CodeMirror 光标（它自己画，不吃 caret-color） */
+        .cm-cursor, .cm-dropCursor {
+            border-left-color: var(--caret) !important;
+            border-left-width: 2px !important;
+        }
+
+        ::selection { background: rgba(99, 102, 241, .28); }
+        body.dark ::selection { background: rgba(129, 140, 248, .34); }
+
+        /* ---------- 项目树：跟随主题（原来暗色下还是白底） ---------- */
+        .project-tree-panel {
+            background: var(--bg-surface-2);
+            border-right: 1px solid var(--border-main);
+        }
+
+        .project-tree-header { border-bottom: 1px solid var(--border-main); }
+
+        .pt-title { color: var(--text-main); }
+        .tree-item { color: var(--text-main); }
+        /* ⚠️ .dir / .file 是**双类选择器**，特异性高于 .tree-item，
+           只写 .tree-item 会被它们压掉 —— 暗色下目录名仍是近黑就是这个原因。 */
+        .tree-item.dir, .tree-item.file { color: var(--text-main); }
+        .tree-item.file { color: var(--text-sub); }
+        .tree-item:hover { background: var(--bg-hover-soft); }
+        .tree-item.selected,
+        .tree-item.active { background: var(--bg-selected); color: var(--accent-text); }
+
+        /* ---------- 通用表面：弹层 / 面板 / 输入 ---------- */
+        .modal-box, .model-picker-dropdown, .role-picker-dropdown, .ws-menu,
+        .trash-panel, .trash-toolbar, .ws-current {
+            background: var(--bg-surface);
+            color: var(--text-main);
+            border-color: var(--border-main);
+        }
+
+        .trash-btn {
+            background: var(--bg-surface);
+            border-color: var(--border-input);
+            color: var(--text-main);
+        }
+
+        .trash-btn:hover { background: var(--bg-hover-soft); }
+        .trash-hint { background: var(--bg-surface-2); color: var(--text-sub); }
+        .ws-current:hover { background: var(--bg-hover); }
+        .ws-item:hover, .ws-menu-new:hover, .ws-item-actions button:hover { background: var(--bg-hover-soft); }
+        .ws-item.active { background: var(--bg-selected); }
+        .ws-item-count { background: var(--bg-surface-3); color: var(--text-sub); }
+        .ws-menu-sep { background: var(--border-main); }
+        .session-item:hover { background: var(--bg-hover); }
+        .composer-attach:hover { background: var(--bg-hover); }
+
+        /* 执行详情 */
+        .exec-details { background: var(--bg-surface-2); }
+        .exec-details > summary:hover { background: var(--bg-hover-soft); }
+        .exec-item .tool-result { background: var(--bg-surface-3); color: var(--text-main); }
+
+        /* 下拉项 */
+        .model-item:hover { background: var(--bg-hover-soft); }
+        .model-item.active { background: var(--bg-selected); }
+        .model-item .default-tag { background: var(--bg-surface-3); color: var(--text-sub); }
+
+        /* 徽标 / 标签：浅底深字 → 语义 token */
+        .prov-tag.def, .trash-kind, .mcp-tools code { background: var(--bg-info); color: var(--fg-info); }
+        .prov-tag.rag { background: var(--bg-info); color: var(--fg-info); }
+        .round-badge.create, .mcp-tag.ok { background: var(--bg-ok); color: var(--fg-ok); }
+        .round-badge.modify, .mcp-tag.net { background: var(--bg-warn); color: var(--fg-warn); }
+        .round-badge.delete, .fail-tag, .mcp-tag.warn { background: var(--bg-danger); color: var(--fg-danger); }
+        .mcp-tag { background: var(--bg-surface-3); color: var(--text-sub); }
+
+        /* 语义提示块（原来 !important 的也要一起换） */
+        .confirm-actions, .msg.search-match .bubble {
+            background: var(--bg-warn) !important;
+            color: var(--fg-warn);
+        }
+
+        .fld-error, .mcp-err, .permission-denied {
+            background: var(--bg-danger) !important;
+            color: var(--fg-danger);
+        }
+
+        /* ---------- 文字色：硬编码 → 语义 token ----------
+           这张表由审计脚本生成：把所有写死的深色文字按语义角色
+           （主文字 / 次级文字 / 强调 / 危险 / 警告 / 成功 / 信息）映射到 token。
+           手工改 60 处必然遗漏，生成出来的覆盖面是全的。 ---------- */
+        .diff-view .diff-lineno { color: var(--text-sub); }
+        .diff-view .diff-del .diff-lineno { color: var(--fg-danger); }
+        .confirm-actions .confirm-text { color: var(--fg-warn); }
+        .session-item { color: var(--text-main); }
+        .exec-details>summary { color: var(--text-sub); }
+        .exec-item .tool-call { color: var(--accent-text); }
+        .exec-item .tool-result { color: var(--fg-ok); }
+        .model-item.active { color: var(--accent-text); }
+        .role-label { color: var(--text-sub); }
+        .trash-sub { color: var(--text-sub); }
+        .trash-hint { color: var(--text-sub); }
+        .trash-path { color: var(--text-main); }
+        .trash-kind { color: var(--accent-text); }
+        .ws-name { color: var(--text-main); }
+        .ws-item-name { color: var(--text-main); }
+        .ws-item-count { color: var(--text-sub); }
+        .ws-bad { color: var(--fg-danger); }
+        .ws-menu-new { color: var(--accent-text); }
+        .fld-label { color: var(--text-main); }
+        .fld-hint { color: var(--text-sub); }
+        .fld-error { color: var(--fg-danger); }
+        .trash-pickall { color: var(--text-main); }
+        .trash-selinfo { color: var(--text-sub); }
+        .plan-header { color: var(--fg-warn); }
+        .plan-item { color: var(--fg-warn); }
+        .plan-item.doing .plan-text { color: var(--fg-warn); }
+        .plan-item.failed .plan-text { color: var(--fg-danger); }
+        .project-tree-header { color: var(--text-sub); }
+        .tree-item.file { color: var(--text-sub); }
+        .tree-item.dir { color: var(--text-main); }
+        .doc-delete:hover { color: var(--fg-danger); }
+        .planner-step::before { color: var(--accent-text); }
+        .review-failed { color: var(--fg-danger); }
+        .msg.search-match .bubble { color: var(--fg-warn) !important; }
+        .msg.search-active .bubble { color: var(--fg-warn) !important; }
+        .settings-btn { color: var(--text-main); }
+        .snav-item { color: var(--text-sub); }
+        .snav-item.active { color: var(--accent-text); }
+        .set-sec h4 { color: var(--text-main); }
+        .set-hint { color: var(--text-sub); }
+        .set-hint.warn { color: var(--fg-warn); }
+        .jump-latest { color: var(--text-main); }
+        .jump-latest:hover { color: var(--accent-text); }
+        .exec-fbtn { color: var(--text-sub); }
+        .exec-fbtn:hover { color: var(--accent-text); }
+        .exec-fbtn.active { color: var(--accent-text); }
+        .exec-item.is-fail .tool-name { color: var(--fg-danger); }
+        .fail-tag { color: var(--fg-danger); }
+        .exec-older > summary { color: var(--text-sub); }
+        .load-older-btn { color: var(--text-sub); }
+        .load-older-btn:hover { color: var(--accent-text); }
+        .prov-empty { color: var(--text-sub); }
+        .prov-name { color: var(--text-main); }
+        .prov-tag.def { color: var(--accent-text); }
+        .prov-tag.rag { color: var(--accent-text); }
+        .prov-state { color: var(--text-sub); }
+        .prov-state.ok { color: var(--fg-ok); }
+        .prov-state.miss { color: var(--fg-warn); }
+        .prov-url { color: var(--text-sub); }
+        .prov-model { color: var(--text-sub); }
+        .prov-model.empty { color: var(--fg-warn); }
+        .prov-sel { color: var(--text-sub); }
+        .prov-form label { color: var(--text-main); }
+        .prov-form .req { color: var(--fg-danger); }
+        .pf-note { color: var(--text-sub); }
+        .pf-result.ok { color: var(--fg-ok); }
+        .pf-result.err { color: var(--fg-danger); }
+        .fp-diff .diff-add { color: var(--fg-ok); }
+        .fp-diff .diff-del { color: var(--fg-danger); }
+        .fp-diff .diff-unchanged { color: var(--text-sub); }
+        .fp-diff .diff-hunk { color: var(--accent-text); }
+        .fp-diff-empty, .fp-diff-note { color: var(--text-sub); }
+        .fp-diff-note { color: var(--fg-warn); }
+        .fp-tab-diff { color: var(--accent-text); }
+        .tool-name { color: var(--accent-text); }
+        .tool-brief { color: var(--text-sub); }
+        .round-title { color: var(--text-main); }
+        .round-meta { color: var(--text-sub); }
+        .round-badge.create { color: var(--fg-ok); }
+        .round-badge.modify { color: var(--fg-warn); }
+        .round-badge.delete { color: var(--fg-danger); }
+        .round-file { color: var(--text-main); }
+        .round-stat { color: var(--text-sub); }
+        .round-btn { color: var(--text-sub); }
+        .round-btn:hover { color: var(--accent-text); }
+        .pc-path { color: var(--accent-text); }
+        .pc-size { color: var(--text-sub); }
+        .pc-preview { color: var(--text-sub); }
+        .ctx-stats { color: var(--fg-info); }
+        .pc-note { color: var(--text-sub); }
+        .mcp-name { color: var(--text-main); }
+        .mcp-status { color: var(--text-sub); }
+        .mcp-tag { color: var(--text-sub); }
+        .mcp-tag.net { color: var(--fg-warn); }
+        .mcp-tools code { color: var(--accent-text); }
+        .mcp-err { color: var(--fg-danger); }
+        .cat-desc { color: var(--text-sub); }
+        .mcp-tag.ok { color: var(--fg-ok); }
+        .mcp-tag.warn { color: var(--fg-danger); }
+        .mcp-field label { color: var(--text-sub); }
+        .key-name { color: var(--text-main); }
+        .key-state.ok { color: var(--fg-ok); }
+        .key-state.miss { color: var(--fg-warn); }
+        .model-picker.compact > button { color: var(--text-main); }
+        .perm-btn { color: var(--text-sub); }
+        .attach-chip { color: var(--accent-text); }
+        .attach-chip button { color: var(--accent-text); }
+        .attach-chip .attach-del { color: var(--fg-danger); }
+        .permission-denied { color: var(--fg-danger) !important; }
+        .produced-label { color: var(--text-sub); }
+        .fp-tab { color: var(--text-sub); }
+        .fp-tab.active { color: var(--text-main); }
+        .fp-tab-x:hover { color: var(--text-main); }
+        .fp-name { color: var(--text-main); }
+        .fp-dirty { color: var(--fg-warn); }
+        .fp-notice { color: var(--text-main); }
+        .fp-notice.warn { color: var(--fg-warn); }
+        .fp-notice.error { color: var(--fg-danger); }
+        .fp-btn { color: var(--text-main); }
+
+        /* 代码点缀 */
+        .bubble th { background: var(--bg-surface-2); color: var(--text-main); }
+        .fld-hint code { background: var(--bg-surface-3); color: var(--text-main); }
 
     </style>
 </head>

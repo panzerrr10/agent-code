@@ -414,3 +414,72 @@ def test_design_tokens_are_defined():
     for token in ("--sp-1", "--r-md", "--fs-md", "--accent", "--shadow-1", "--bg-header"):
         assert f"{token}:" in html, f"设计尺度里缺少 {token}"
     assert "body.dark {" in html, "缺少暗色模式的 token 覆盖"
+
+
+# 亮/暗两套配色必须成对定义。漏一个不会报错，只会让某块区域在暗色下
+# 依然是白底（真实事故：项目树面板在整个暗色模式下都是白的）。
+THEME_TOKENS = [
+    "--bg-surface", "--bg-surface-2", "--bg-surface-3", "--bg-hover-soft",
+    "--bg-selected", "--border-soft",
+    "--bg-info", "--fg-info", "--bg-ok", "--fg-ok",
+    "--bg-warn", "--fg-warn", "--bg-danger", "--fg-danger",
+    "--caret",
+    "--bg-page", "--bg-app", "--bg-chat", "--bg-bubble-ai", "--bg-input",
+    "--bg-sidebar", "--bg-hover", "--text-main", "--text-sub",
+    "--border-main", "--border-input", "--accent-text",
+]
+
+
+def _theme_blocks(html: str):
+    """把所有 :root / body.dark 块的 token 定义合起来返回。
+
+    **注意是「所有」**：这份样式表里 :root 和 body.dark 都出现了多次
+    （原始的一套 + 后加的设计尺度 / 主题各一套），只取第一个会漏掉后加的。
+    """
+    def grab_all(sel):
+        parts = []
+        for m in re.finditer(re.escape(sel) + r"\s*\{([^}]*)\}", html, re.S):
+            parts.append(m.group(1))
+        return "\n".join(parts)
+    return grab_all(":root"), grab_all("body.dark")
+
+
+def test_theme_tokens_are_defined_in_both_modes():
+    """亮色与暗色必须**成对**定义同一批 token。
+
+    只定义一边的后果是静默的：那块区域会一直用另一套颜色，
+    比如暗色模式下面板仍是白底 —— 正是这次要修的问题。
+    """
+    with open(INDEX, encoding="utf-8") as f:
+        html = f.read()
+    light, dark = _theme_blocks(html)
+    assert light and dark, "找不到 :root / body.dark 的 token 块"
+    missing_light = [t for t in THEME_TOKENS if f"{t}:" not in light]
+    missing_dark = [t for t in THEME_TOKENS if f"{t}:" not in dark]
+    assert not missing_light, f"亮色缺少这些 token：{missing_light}"
+    assert not missing_dark, f"暗色缺少这些 token：{missing_dark}"
+
+
+def test_caret_color_is_shared_by_both_modes():
+    """光标在两种模式下必须是**同一个淡灰**（这是明确要求）。
+
+    顺便：白底上纯黑光标太扎眼、黑底上纯白光标更扎眼，
+    中间调的灰在两边都清楚。
+    """
+    with open(INDEX, encoding="utf-8") as f:
+        html = f.read()
+    light, dark = _theme_blocks(html)
+    m1 = re.search(r"--caret:\s*(#\w+)", light)
+    m2 = re.search(r"--caret:\s*(#\w+)", dark)
+    assert m1 and m2, "两套配色都要定义 --caret"
+    assert m1.group(1).lower() == m2.group(1).lower(), (
+        f"光标颜色不一致：亮色 {m1.group(1)}，暗色 {m2.group(1)}"
+    )
+    # 必须是「淡灰」而不是纯黑/纯白
+    v = int(m1.group(1)[1:], 16)
+    r, g, b = (v >> 16) & 255, (v >> 8) & 255, v & 255
+    lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+    assert 0.45 < lum < 0.75, f"光标应当是中间调的淡灰，实际亮度 {lum:.2f}"
+    # 而且真的要应用到可编辑元素上
+    assert "caret-color: var(--caret)" in html, "定义了 --caret 但没用上"
+    assert ".cm-cursor" in html, "CodeMirror 的光标要单独设（它不吃 caret-color）"
