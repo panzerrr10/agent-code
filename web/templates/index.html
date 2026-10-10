@@ -3808,6 +3808,62 @@
         .fp-notice.error { color: var(--fg-danger); }
         .fp-btn { color: var(--text-main); }
 
+        /* ============================================================
+           Agent 回答：去掉气泡外壳，铺满整个对话区
+           ------------------------------------------------------------
+           原来回答被装在一个卡片里（底色 + 边框 + 阴影 + 78ch 上限），
+           Agent 的输出（尤其是表格、代码块、diff）在卡片里被挤得很窄。
+           现在回答直接铺在对话区上，宽度跟着对话区走。
+
+           **只对助手消息生效** —— 用户消息保留气泡，因为那能一眼区分
+           「谁说的」；Agent 的长时间输出更适合当正文读，而不是当卡片看。
+           ============================================================ */
+        .msg.assistant .bubble-wrap {
+            max-width: 100%;
+            width: 100%;
+            align-items: stretch;
+        }
+
+        .msg.assistant .bubble {
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            border-radius: 0;
+            max-width: none;
+            padding: 0;
+        }
+
+        /* 底下的「执行详情」「第 N 轮改动」也跟着铺满 */
+        .msg.assistant .bubble-wrap > * { max-width: 100%; }
+
+        /* 没有卡片托底之后，消息之间的间隔要自己撑出来，
+           否则上一条回答和下一个提问会糊在一起 */
+        .msg.assistant { margin: 6px 0 14px; }
+
+        /* 行内 code 原来是靠卡片底色衬托的，去掉卡片后它需要自己的底色 */
+        .msg.assistant .bubble code:not(pre code) {
+            background: var(--bg-surface-3);
+            border: 1px solid var(--border-main);
+            padding: 1px 5px;
+            border-radius: var(--r-sm);
+        }
+
+        /* 表格/引用/分割线这些块级元素原来被卡片边缘裁着，现在自己撑开 */
+        .msg.assistant .bubble table { width: 100%; }
+        .msg.assistant .bubble blockquote {
+            border-left: 3px solid var(--border-main);
+            padding-left: 10px;
+            color: var(--text-sub);
+            margin: 8px 0;
+        }
+
+        /* 搜索命中时依然要能看出来是哪条 —— 这时才给一层底色 */
+        .msg.assistant.search-match .bubble {
+            background: var(--bg-warn) !important;
+            border-radius: var(--r-md);
+            padding: 6px 10px;
+        }
+
         /* 代码点缀 */
         .bubble th { background: var(--bg-surface-2); color: var(--text-main); }
         .fld-hint code { background: var(--bg-surface-3); color: var(--text-main); }

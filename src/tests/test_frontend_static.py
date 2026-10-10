@@ -483,3 +483,50 @@ def test_caret_color_is_shared_by_both_modes():
     # 而且真的要应用到可编辑元素上
     assert "caret-color: var(--caret)" in html, "定义了 --caret 但没用上"
     assert ".cm-cursor" in html, "CodeMirror 的光标要单独设（它不吃 caret-color）"
+
+
+def test_assistant_answer_is_not_boxed():
+    """Agent 的回答是**铺在对话区上的正文**，不是卡片。
+
+    需求原话：「取消 agent 输出回答的对话框，agent 输出的回答将在整个对话界面显示
+    而不是被局限在对话框内」。
+
+    这里守住四条 —— 少任何一条都会让回答退回成卡片：
+      · 背景透明、无边框、无阴影、无圆角
+      · 宽度上限放开（原来是 78ch，把表格/代码块挤得很窄）
+      · bubble-wrap 占满（原来是 88%）
+      · **只对助手消息生效**：用户消息要保留气泡，那能一眼区分「谁说的」
+    """
+    with open(INDEX, encoding="utf-8") as f:
+        html = f.read()
+
+    def rule(selector):
+        """取出某个选择器的最后一条规则体（后面的覆盖前面的）。"""
+        hits = re.findall(re.escape(selector) + r"\s*\{([^}]*)\}", html)
+        return " ".join(hits[-1].split()) if hits else ""
+
+    bub = rule(".msg.assistant .bubble")
+    assert bub, "找不到 .msg.assistant .bubble 的样式"
+    for prop, want in (("background", "transparent"), ("border", "none"),
+                       ("box-shadow", "none"), ("max-width", "none")):
+        assert f"{prop}: {want}" in bub, f"助手气泡应当 `{prop}: {want}`，实际规则：{bub}"
+
+    wrap = rule(".msg.assistant .bubble-wrap")
+    assert "max-width: 100%" in wrap, f"bubble-wrap 应当占满，实际：{wrap}"
+
+    # 用户气泡必须还在（不能被一起拍平）
+    user = rule(".msg.user .bubble")
+    assert "background: var(--accent)" in user, "用户气泡的底色不该被去掉"
+
+
+def test_flat_layout_keeps_inline_code_visible():
+    """去掉卡片底色后，行内 code 必须有自己的底色。
+
+    否则 `code` 会和正文糊在一起 —— 原来它是靠卡片底色衬托的。
+    """
+    with open(INDEX, encoding="utf-8") as f:
+        html = f.read()
+    assert ".msg.assistant .bubble code:not(pre code)" in html, \
+        "缺少行内 code 的独立底色规则"
+    # 搜索命中时仍要能看出是哪条
+    assert ".msg.assistant.search-match .bubble" in html, "搜索命中高亮丢了"
