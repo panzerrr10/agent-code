@@ -324,6 +324,7 @@
 
         /* 右侧对话区 */
         .chat-panel {
+            position: relative;   /* 「跳到最新」按钮的定位祖先 */
             flex: 1;
             display: flex;
             flex-direction: column;
@@ -2044,6 +2045,118 @@
         body.dark .set-hint.warn { background: #2c2410; border-color: #4d3a10; color: #fbbf24; }
         body.dark .set-hint code { background: #232833; }
 
+        /* ===== 跳到最新 ===== */
+        .jump-latest {
+            position: absolute;
+            right: 28px;
+            bottom: 150px;
+            z-index: 6;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 18px;
+            background: #fff;
+            color: #374151;
+            font-size: 12px;
+            cursor: pointer;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, .14);
+        }
+
+        .jump-latest:hover { border-color: #6366f1; color: #3730a3; }
+        .jl-arrow { font-size: 13px; }
+
+        body.dark .jump-latest { background: #232833; border-color: #333a47; color: #cbd5e1; }
+
+        /* ===== 执行详情：筛选行与折叠 ===== */
+        .exec-filter {
+            display: flex;
+            gap: 5px;
+            padding: 2px 0 6px;
+            position: sticky;
+            top: 0;
+            background: inherit;
+            z-index: 1;
+        }
+
+        .exec-fbtn {
+            border: 1px solid #e5e7eb;
+            background: #fff;
+            border-radius: 12px;
+            font-size: 10.5px;
+            padding: 2px 8px;
+            cursor: pointer;
+            color: #6b7280;
+        }
+
+        .exec-fbtn b { font-weight: 600; }
+        .exec-fbtn:hover { border-color: #c7d2fe; color: #3730a3; }
+
+        .exec-fbtn.active {
+            background: #eef2ff; border-color: #c7d2fe; color: #3730a3; font-weight: 600;
+        }
+
+        /* 失败的操作用红色标出来，并在收尾时置顶 */
+        .exec-item.is-fail > .tool-details > summary {
+            background: rgba(239, 68, 68, .09);
+            border-radius: 5px;
+        }
+
+        .exec-item.is-fail .tool-name { color: #b91c1c; }
+
+        .fail-tag {
+            font-size: 9.5px;
+            padding: 0 5px;
+            border-radius: 8px;
+            background: #fee2e2;
+            color: #991b1b;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .exec-older { margin: 6px 0 2px; }
+
+        .exec-older > summary {
+            cursor: pointer;
+            font-size: 11px;
+            color: #6b7280;
+            padding: 3px 6px;
+            border-radius: 5px;
+            list-style: none;
+        }
+
+        .exec-older > summary::-webkit-details-marker { display: none; }
+        .exec-older > summary:hover { background: rgba(127, 127, 127, .1); }
+        .exec-older[open] > summary { font-weight: 600; }
+
+        .exec-older-box {
+            margin-left: 10px;
+            padding-left: 8px;
+            border-left: 2px solid #e5e7eb;
+        }
+
+        body.dark .exec-fbtn { background: #232833; border-color: #333a47; color: #9ca3af; }
+        body.dark .exec-fbtn.active { background: #2a3050; color: #a5b4fc; }
+        body.dark .exec-older-box { border-color: #333a47; }
+
+        /* ===== 加载更早的消息 ===== */
+        .load-older-btn {
+            display: block;
+            margin: 6px auto 14px;
+            padding: 6px 16px;
+            border: 1px solid #e5e7eb;
+            border-radius: 16px;
+            background: #fff;
+            color: #6b7280;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .load-older-btn:hover { border-color: #c7d2fe; color: #3730a3; }
+
+        body.dark .load-older-btn { background: #232833; border-color: #333a47; color: #9ca3af; }
+
         /* ===== 会话搜索与列表元信息 ===== */
         .session-search { padding: 0 8px 6px; }
 
@@ -3218,6 +3331,11 @@
             </div>
 
             <div class="chat-panel">
+                <!-- 跳到最新：长任务里往上翻之后回不到底部（旧代码还在无条件把你往下拽） -->
+                <button id="jumpLatest" class="jump-latest" style="display: none;"
+                        onclick="jumpToLatest()" title="跳到最新" aria-label="跳到最新消息">
+                    <span class="jl-arrow">↓</span><span class="jl-text"></span>
+                </button>
                 <!-- 任务计划面板 -->
                 <div class="plan-panel" id="planPanel" style="display: none;">
                     <div class="plan-header">
@@ -3837,7 +3955,7 @@
             const ctx = run.ctx;
             if (ev.type === "text") {
                 ctx.bubble.innerHTML = DOMPurify.sanitize(marked.parse(run.fullText));
-                chat.scrollTop = chat.scrollHeight;
+                followChat();
 
             } else if (ev.type === "token_usage") {
                 ctx.tokenInfo.innerHTML =
@@ -3950,6 +4068,7 @@
                 ctx.bubble.textContent = "⚠️ " + ev.content;
 
             } else if (ev.type === "done") {
+                finalizeExecList(ctx);
                 finishRoundCard(ctx, run.sessionId);
             }
         }
@@ -4191,6 +4310,136 @@
             }
         }
 
+        // ===== 「跳到最新」=====
+        // 现在流式期间无条件 `chat.scrollTop = chat.scrollHeight`，
+        // 用户往上翻看历史时会被**一直拽回底部** —— 根本没法读。
+        // 改成：用户本来就在底部才跟随；往上翻了就显示一个浮动按钮。
+        let chatSticky = true;        // 是否「粘」在底部
+        let pendingNewCount = 0;      // 用户翻上去之后又来了几条
+
+        function chatNearBottom(slack = 80) {
+            return chat.scrollHeight - chat.scrollTop - chat.clientHeight <= slack;
+        }
+
+        function scrollChatToBottom(smooth) {
+            chatSticky = true;
+            pendingNewCount = 0;
+            updateJumpLatest();
+            chat.scrollTo({ top: chat.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+        }
+
+        function jumpToLatest() { scrollChatToBottom(true); }
+
+        function updateJumpLatest() {
+            const btn = document.getElementById("jumpLatest");
+            if (!btn) return;
+            const show = !chatSticky && chat.scrollHeight > chat.clientHeight + 40;
+            btn.style.display = show ? "flex" : "none";
+            const txt = btn.querySelector(".jl-text");
+            if (txt) txt.textContent = pendingNewCount ? `${pendingNewCount} 条新内容` : "";
+        }
+
+        /** 流式期间要滚动时统一走这里：只在用户本来就在底部时才真滚。 */
+        function followChat() {
+            if (chatSticky) {
+                chat.scrollTop = chat.scrollHeight;
+            } else {
+                pendingNewCount += 1;
+                updateJumpLatest();
+            }
+        }
+
+        // 用户手动滚动时更新 sticky 状态
+        chat.addEventListener("scroll", () => {
+            const atBottom = chatNearBottom();
+            if (atBottom && !chatSticky) { chatSticky = true; pendingNewCount = 0; }
+            else if (!atBottom && chatSticky) { chatSticky = false; }
+            updateJumpLatest();
+        }, { passive: true });
+
+        // ===== 执行详情：分组折叠与筛选 =====
+        // ===== 执行详情：分组折叠与筛选 =====
+        // 长任务里几十条工具调用平铺成一坨，展开后要滚很久，
+        // 而且**失败的那条淹在中间**。所以跑完做一次整理：
+        //   ① 失败的操作**置顶**并展开
+        //   ② 只保留最近 N 条在外，更早的收进可展开的「更早的 N 个操作」
+        //   ③ 一个筛选行：全部 / 写文件 / 失败
+
+        const EXEC_KEEP_RECENT = 4;
+        const EXEC_WRITE_TOOLS = new Set(["write_file", "create_file", "edit_file",
+                                          "multi_edit", "delete_file"]);
+
+        function finalizeExecList(ctx) {
+            const list = ctx && ctx.execList;
+            if (!list) return;
+            const items = [...list.querySelectorAll(":scope > .exec-item")];
+            if (!items.length) return;
+
+            // 已经整理过就别重复（续跑会再走一次）
+            list.querySelector(".exec-filter")?.remove();
+            const oldWrap = list.querySelector(".exec-older");
+            if (oldWrap) { oldWrap.replaceWith(...oldWrap.querySelectorAll(".exec-item")); }
+
+            const fresh = [...list.querySelectorAll(":scope > .exec-item")];
+            const fails = fresh.filter(el => el.classList.contains("is-fail"));
+            const writes = fresh.filter(el => EXEC_WRITE_TOOLS.has(el.dataset.tool));
+
+            // 筛选行
+            const bar = document.createElement("div");
+            bar.className = "exec-filter";
+            bar.innerHTML = `
+                <button type="button" class="exec-fbtn active" data-f="all">全部 <b>${fresh.length}</b></button>
+                <button type="button" class="exec-fbtn" data-f="write">写文件 <b>${writes.length}</b></button>
+                <button type="button" class="exec-fbtn" data-f="fail">失败 <b>${fails.length}</b></button>`;
+            bar.addEventListener("click", (ev) => {
+                const b = ev.target.closest(".exec-fbtn");
+                if (!b) return;
+                bar.querySelectorAll(".exec-fbtn").forEach(x => x.classList.toggle("active", x === b));
+                applyExecFilter(list, b.dataset.f);
+            });
+            list.prepend(bar);
+
+            // 更早的收起来。
+            // **必须先确定「保留集合」再置顶。** 反过来做过一次并且踩了坑：
+            // 先把失败移到最前，再 `slice(0, n-keep)` 切「更早的」，
+            // 等于刚置顶的失败立刻又被折进折叠块里 —— 白置顶。
+            // 正确做法：保留集合 = 最近 N 条 ∪ 全部失败，其余才算「更早的」。
+            const all = [...list.querySelectorAll(":scope > .exec-item")];
+            const keepSet = new Set(all.slice(-EXEC_KEEP_RECENT));
+            fails.forEach(el => keepSet.add(el));
+            const older = all.filter(el => !keepSet.has(el));
+
+            // 失败置顶：按原顺序插到筛选行后面
+            for (const el of fails) list.insertBefore(el, bar.nextSibling);
+
+            if (older.length > 1) {
+                const wrap = document.createElement("details");
+                wrap.className = "exec-older";
+                const nFail = older.filter(el => el.classList.contains("is-fail")).length;
+                wrap.innerHTML = `<summary>▸ 更早的 ${older.length} 个操作`
+                    + (nFail ? `（含 ${nFail} 个失败）` : "") + `</summary>`;
+                const box = document.createElement("div");
+                box.className = "exec-older-box";
+                older.forEach(el => box.appendChild(el));
+                wrap.appendChild(box);
+                list.appendChild(wrap);
+            }
+            applyExecFilter(list, "all");
+        }
+
+        function applyExecFilter(list, mode) {
+            const items = [...list.querySelectorAll(".exec-item")];
+            items.forEach(el => {
+                let show = true;
+                if (mode === "write") show = EXEC_WRITE_TOOLS.has(el.dataset.tool);
+                else if (mode === "fail") show = el.classList.contains("is-fail");
+                el.style.display = show ? "" : "none";
+            });
+            // 筛选时把「更早的」也自动展开，否则筛了却看不见
+            const wrap = list.querySelector(".exec-older");
+            if (wrap && mode !== "all") wrap.open = true;
+        }
+
         /**
          * 收尾：把流式期间的临时芯片换成「第 N 轮改动」卡片。
          *
@@ -4402,17 +4651,32 @@
             ctx.execTitle.textContent = `执行详情（${count} 个工具调用）`;
             const item = document.createElement("div");
             item.className = "exec-item";
+            item.dataset.tool = toolName;          // 分组与筛选用
             const icon = TOOL_ICONS[toolName] || "🔧";
             let pretty = "";
             try { pretty = JSON.stringify(toolArgs, null, 2); } catch (e) { pretty = String(toolArgs); }
             item.innerHTML = toolItemHtml(toolName, toolArgs, icon, pretty);
             ctx.execList.appendChild(item);
-            chat.scrollTop = chat.scrollHeight;
+            followChat();      // 用户翻上去看历史时不要把他拽下来
             return item.querySelector(".tool-result");
         }
 
         function updateToolResult(resultEl, content) {
             resultEl.textContent = "📋 " + content;
+            // 失败的操作用红色标出来。长任务里几十条操作平铺，
+            // 失败那条淹在中间基本找不到 —— 所以不只上色，还要在收尾时置顶。
+            const item = resultEl.closest(".exec-item");
+            if (item) {
+                const failed = String(content || "").trimStart().startsWith("❌");
+                item.classList.toggle("is-fail", failed);
+                const badge = item.querySelector(".tool-details > summary");
+                if (badge && failed && !badge.querySelector(".fail-tag")) {
+                    const t = document.createElement("span");
+                    t.className = "fail-tag";
+                    t.textContent = "失败";
+                    badge.appendChild(t);
+                }
+            }
         }
 
         // 从数据库恢复一条 AI 消息
@@ -4967,7 +5231,18 @@
                 // 稍后按轮次把改动卡片挂上去（刷新页面后历史轮次仍能回看）。
                 let _userCount = 0;
                 const _roundEls = {};
-                messages.forEach(m => {
+
+                // **长会话只渲染最近 N 条。**
+                // 原来是全量渲染：几百条消息的会话（长任务很容易积累）会一次性
+                // 建出上千个 DOM 节点 + 一堆 CodeMirror/marked 解析，切过去会明显卡住。
+                // 更早的折成一个按钮，点了才渲染 —— 高度不固定的聊天流做虚拟滚动
+                // 得不偿失，这样已经能解决绝大部分问题。
+                const HISTORY_RENDER_LIMIT = 30;
+                let _older = [];
+                if (messages.length > HISTORY_RENDER_LIMIT) {
+                    _older = messages.slice(0, messages.length - HISTORY_RENDER_LIMIT);
+                }
+                const _renderFrom = (arr) => arr.forEach(m => {
                     const t = m.created_at && m.created_at.length >= 16
                         ? m.created_at.slice(0, 16) : "";
                     if (m.role === "user") {
@@ -4989,6 +5264,19 @@
                         }
                     }
                 });
+                _renderFrom(messages.slice(-HISTORY_RENDER_LIMIT));
+
+                if (_older.length) {
+                    const more = document.createElement("button");
+                    more.className = "load-older-btn";
+                    more.textContent = `⤒ 加载更早的 ${_older.length} 条消息`;
+                    more.onclick = () => {
+                        more.remove();
+                        _renderFrom(_older);      // 渲染到最前面，顺序自然正确
+                        chat.scrollTop = 0;
+                    };
+                    chat.prepend(more);
+                }
                 attachHistoryRoundCards(sessionId, _roundEls);
 
                 // 若切回的会话有"运行中的任务"：从内存重绘 + 重新挂载实时输出
@@ -7595,7 +7883,7 @@
 
             // 插到 bubble 前面
             ctx.bubble.parentElement.insertBefore(card, ctx.bubble);
-            chat.scrollTop = chat.scrollHeight;
+            followChat();
             return card;
         }
 
