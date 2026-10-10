@@ -31,11 +31,15 @@ def _clean_settings():
     真实 .env 里那几家 provider —— 测出来的东西就不是本用例加的了。
     """
     os.makedirs(os.path.dirname(cp.SETTINGS_FILE), exist_ok=True)
+    for pth in (cp.SETTINGS_FILE, cp.SETTINGS_FILE + ".bak"):
+        if os.path.exists(pth):
+            os.remove(pth)
     with open(cp.SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(EMPTY_CFG, f)
     yield
-    with open(cp.SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(EMPTY_CFG, f)
+    for pth in (cp.SETTINGS_FILE, cp.SETTINGS_FILE + ".bak"):
+        if os.path.exists(pth):
+            os.remove(pth)
 
 
 # ============ 提供商管理（用户自定义，后端无预设）============
@@ -315,3 +319,53 @@ def test_open_files_survives_reconnect(client):
     wid = client.post("/workspaces", json={"name": "of5", "path": d}).get_json()["id"]
     client.put(f"/workspaces/{wid}/open_files", json={"paths": [os.path.join(d, "x.py")]})
     assert db.get_workspace_open_files(wid) == [os.path.join(d, "x.py")]
+
+
+# ============ 自动备份 ============
+
+
+def test_backup_keeps_previous_version(client):
+    """改配置前留一份 .bak —— 这是密钥的唯一副本，手滑就没了的代价太大。"""
+    bak = cp.SETTINGS_FILE + ".bak"
+    assert not os.path.exists(bak), "初始不该有备份"
+
+    _add(client, id="one", name="第一版")
+    # 首次保存的「上一版」是 fixture 写进去的空配置
+    assert json.load(open(bak, encoding="utf-8"))["providers"] == {}
+
+    _add(client, id="one", name="第二版")
+    assert os.path.exists(bak), "第二次写应该留下上一版"
+    saved = json.load(open(bak, encoding="utf-8"))["providers"]["one"]
+    assert saved["name"] == "第一版", ".bak 里应该**是上一版**而不是当前版"
+
+    _add(client, id="one", name="第三版")
+    saved = json.load(open(bak, encoding="utf-8"))["providers"]["one"]
+    assert saved["name"] == "第二版"
+
+
+def test_backup_not_rewritten_when_nothing_changed(client):
+    """内容没变就不该动 .bak —— 否则重复保存会毁掉真正有价值的那份历史。"""
+    bak = cp.SETTINGS_FILE + ".bak"
+    _add(client, id="one", name="A")
+    _add(client, id="one", name="B")           # .bak 里是 A
+    cfg = cp.load_config()
+    cp.save_config(cfg)                        # 原样再存一次
+    cp.save_config(cp.load_config())
+    saved = json.load(open(bak, encoding="utf-8"))["providers"]["one"]
+    assert saved["name"] == "A", "内容未变时 .bak 不该被覆盖"
+
+
+def test_backup_file_is_600(client):
+    """备份里同样有明文密钥，权限必须一样严。"""
+    _add(client, id="one", name="A")
+    _add(client, id="one", name="B")
+    bak = cp.SETTINGS_FILE + ".bak"
+    assert oct(os.stat(bak).st_mode & 0o777) == "0o600"
+
+
+def test_backup_does_not_leak_into_api(client):
+    """备份文件是本地文件，绝不能顺着任何接口漏出去。"""
+    _add(client, id="one")
+    _add(client, id="one", name="改过")
+    blob = client.get("/api/providers").get_data(as_text=True)
+    assert SECRET not in blob

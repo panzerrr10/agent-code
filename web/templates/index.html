@@ -7010,7 +7010,26 @@
             }
         }
 
+        /** 正在发起的任务（防重入）。见下面 runTask 里的说明。 */
+        let taskStarting = false;
+
         async function runTask() {
+            // **显式防重入。**
+            // 以前这里没有保护，靠的是「输入框在同步阶段就被清空」让第二次调用
+            // 在下面的空输入判断处返回。那是**巧合不是设计**：
+            // 当 currentSessionId 为空时，控制流会在 `await createNewSession()`
+            // 处挂起，此时输入框还没清空，于是第二个调用又跑了一遍完整流程 ——
+            // 实测会发出 2 次 /run 并建出 2 个会话。
+            if (taskStarting) return;
+            taskStarting = true;
+            try {
+                return await _runTaskInner();
+            } finally {
+                taskStarting = false;
+            }
+        }
+
+        async function _runTaskInner() {
             const input = document.getElementById("task");
             const task = input.value.trim();
             const images = pendingImages.map(img => img.dataUrl);   // 待发送图片（data URL）
@@ -7096,13 +7115,6 @@
                 }
             }
         }
-
-        document.getElementById("task").addEventListener("keydown", e => {
-            if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                runTask();
-            }
-        });
 
         // 启动顺序很重要：先确定工作区，再按工作区载入会话列表与项目树
         (async function bootstrap() {

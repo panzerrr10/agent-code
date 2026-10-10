@@ -255,12 +255,36 @@ def test_only_one_sse_consumer_exists():
 
 
 def test_both_run_paths_use_the_shared_consumer():
-    """首次运行与续跑必须都走同一个消费函数。"""
+    """首次运行与续跑必须都走同一个消费函数。
+
+    注意盯的是 ``_runTaskInner`` 而不是 ``runTask``：
+    ``runTask`` 现在只是一层**防重入包装**（`taskStarting` 标志），
+    真正干活的在 ``_runTaskInner`` 里。
+    """
     js = _inline_js()
-    for sig in ("async function runTask(", "async function resumeRun("):
+    for sig in ("async function _runTaskInner(", "async function resumeRun("):
         body = _function_body(js, sig)
         assert "consumeSseStream(" in body, f"{sig} 没有使用共享的 SSE 消费者"
         assert "handleSseEvent(" not in body, f"{sig} 里又出现了自己的事件分发"
+
+
+def test_task_entry_is_guarded_against_reentry():
+    """``runTask`` 必须有防重入。
+
+    真实事故：``#task`` 上挂了**两个**一模一样的 Enter 监听，都会调 runTask。
+    当时没有防重入，只是靠「输入框在同步阶段被清空」让第二次调用提前返回 ——
+    **巧合不是设计**：currentSessionId 为空时控制流会在 `await createNewSession()`
+    挂起，输入框尚未清空，第二个调用于是又跑一遍，实测发出 2 次 /run、建 2 个会话。
+    """
+    js = _inline_js()
+    # 监听只能有一处
+    assert js.count('addEventListener("keydown"') >= 1
+    assert js.count('getElementById("task").addEventListener("keydown"') == 0, \
+        "#task 上又出现了第二处 keydown 监听"
+    # 防重入标志要在真正干活之前检查
+    body = _function_body(js, "async function runTask(")
+    assert "taskStarting" in body, "runTask 缺少防重入标志"
+    assert "if (taskStarting) return;" in body, "runTask 没有在入口处拦截重入"
 
 
 def test_shared_handler_covers_all_core_events():

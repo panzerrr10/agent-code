@@ -153,16 +153,36 @@ def load_config() -> dict:
     return data
 
 
-def save_config(cfg: dict) -> None:
-    os.makedirs(os.path.dirname(SETTINGS_FILE) or ".", exist_ok=True)
-    tmp = SETTINGS_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, SETTINGS_FILE)
+def _chmod_600(path: str) -> None:
     try:
-        os.chmod(SETTINGS_FILE, 0o600)     # 里面有密钥，只给本人读写
+        os.chmod(path, 0o600)              # 里面有密钥，只给本人读写
     except OSError:
         pass
+
+
+def save_config(cfg: dict) -> None:
+    os.makedirs(os.path.dirname(SETTINGS_FILE) or ".", exist_ok=True)
+    body = json.dumps(cfg, ensure_ascii=False, indent=2)
+
+    # 覆盖前把**上一版**留成 .bak。
+    # 这是密钥的唯一副本（.env 里已经没有了），手滑删掉 / 写坏就找不回来了。
+    # 只在内容真的变化时才动 .bak —— 否则「重新保存一次没改的东西」会
+    # 用同一份内容覆盖掉真正有价值的那份历史。
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, encoding="utf-8") as f:
+                if f.read() != body:
+                    import shutil
+                    shutil.copy2(SETTINGS_FILE, SETTINGS_FILE + ".bak")
+                    _chmod_600(SETTINGS_FILE + ".bak")
+    except OSError:
+        logger.warning("写 .bak 备份失败（不影响保存）", exc_info=True)
+
+    tmp = SETTINGS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(body)
+    os.replace(tmp, SETTINGS_FILE)
+    _chmod_600(SETTINGS_FILE)
 
 
 def migrate_legacy_env(old: dict) -> dict:
