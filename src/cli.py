@@ -20,13 +20,13 @@ load_dotenv()
 def load_config():
     """从环境变量 / .env / config_providers 加载配置。
 
-    批次 6：兜底值改为 config_providers.get_provider(DEFAULT_PROVIDER)，
+    兜底值来自 config_providers 的默认提供商（用户在界面里配置的那家），
     config.py 里的 BASE_URL / MODEL 常量已删除。
     命令行 --api-key / --base-url / --model 仍可覆盖（开发者便利）。
     """
-    from config_providers import DEFAULT_PROVIDER, get_provider
+    from config_providers import get_default_provider_id, get_provider
 
-    cfg = get_provider(DEFAULT_PROVIDER)
+    cfg = get_provider(get_default_provider_id())
     return {
         "api_key": os.getenv("API_KEY") or cfg["api_key"],
         "base_url": os.getenv("BASE_URL") or cfg["base_url"],

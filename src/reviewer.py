@@ -1,13 +1,14 @@
-from config_providers import DEFAULT_PROVIDER, get_provider
+from config_providers import get_default_provider_id, get_provider
 from utils import call_llm_with_retry, get_llm_client
 
 
 def _get_default_client():
     """按默认 provider 取客户端（进程内复用）。"""
-    cfg = get_provider(DEFAULT_PROVIDER)
+    cfg = get_provider()
     if not cfg.get("api_key"):
         raise RuntimeError(
-            f"默认 provider {DEFAULT_PROVIDER} 的 api_key 未配置，请检查 .env"
+            f"默认提供商「{cfg.get('name') or '（未配置）'}」还没有 api_key，"
+            "请在 设置 → 模型与密钥 里添加"
         )
     return get_llm_client(cfg["api_key"], cfg["base_url"])
 
@@ -49,7 +50,7 @@ def review(
     只传最终文本会让审查流于表面，因此把证据一起交给 Reviewer。
     """
     # 动态选择 client 和 model
-    default_cfg = get_provider(DEFAULT_PROVIDER)
+    default_cfg = get_provider(get_default_provider_id())
     if api_key:
         actual_client = get_llm_client(api_key, base_url or default_cfg["base_url"])
         actual_model = model or default_cfg["default_model"]

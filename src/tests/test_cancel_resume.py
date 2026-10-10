@@ -192,8 +192,8 @@ def test_cancel_between_tools_keeps_message_sequence_valid(monkeypatch):
 
 
 def _stub_provider(monkeypatch):
-    monkeypatch.setattr(app_module, "get_provider", lambda pid: dict(PROVIDER_CFG))
-    monkeypatch.setattr(agent, "get_provider", lambda pid: dict(PROVIDER_CFG))
+    monkeypatch.setattr(app_module, "get_provider", lambda pid=None: dict(PROVIDER_CFG))
+    monkeypatch.setattr(agent, "get_provider", lambda pid=None: dict(PROVIDER_CFG))
     monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
 
 

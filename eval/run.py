@@ -39,9 +39,9 @@ harness.isolate_env()
 
 def _resolve_provider(args):
     """决定用哪个 provider / 模型。默认和 Web 端一致（config_providers 的默认）。"""
-    from config_providers import DEFAULT_PROVIDER, get_provider, get_provider_list
+    from config_providers import get_default_provider_id, get_provider, get_provider_list
 
-    pid = args.provider or DEFAULT_PROVIDER
+    pid = args.provider or get_default_provider_id()
     cfg = get_provider(pid)
     model = args.model or cfg.get("default_model")
 

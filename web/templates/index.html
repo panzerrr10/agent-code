@@ -1931,6 +1931,7 @@
 
         /* ===== 设置面板 ===== */
         .settings-box {
+            position: relative;
             width: min(880px, 94vw);
             height: min(660px, 88vh);
             display: flex;
@@ -2042,6 +2043,122 @@
         body.dark .set-sec h4 { color: #e5e7eb; }
         body.dark .set-hint.warn { background: #2c2410; border-color: #4d3a10; color: #fbbf24; }
         body.dark .set-hint code { background: #232833; }
+
+        /* ===== 模型提供商管理 ===== */
+        .prov-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+        .prov-empty {
+            border: 1px dashed #d1d5db;
+            border-radius: 8px;
+            padding: 18px 14px;
+            text-align: center;
+            color: #6b7280;
+            font-size: 12.5px;
+            line-height: 1.8;
+            background: #fafafa;
+        }
+
+        .prov-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 9px 11px;
+            margin-bottom: 8px;
+            background: #fff;
+        }
+
+        .prov-card:hover { border-color: #c7d2fe; }
+
+        .prov-top { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+        .prov-icon { font-size: 15px; }
+        .prov-name { font-weight: 600; font-size: 13px; color: #111827; }
+
+        .prov-tag {
+            font-size: 10px; padding: 1px 6px; border-radius: 9px; font-weight: 600;
+        }
+
+        .prov-tag.def { background: #dbeafe; color: #1d4ed8; }
+        .prov-tag.rag { background: #ede9fe; color: #6d28d9; }
+
+        .prov-state { font-size: 11px; color: #6b7280; }
+        .prov-state.ok { color: #15803d; }
+        .prov-state.miss { color: #b45309; }
+
+        .prov-ops { margin-left: auto; display: flex; gap: 5px; }
+
+        .prov-url {
+            font-family: ui-monospace, Menlo, monospace;
+            font-size: 11px; color: #6b7280; margin: 5px 0 6px;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+
+        .prov-models { display: flex; flex-wrap: wrap; gap: 4px; }
+
+        .prov-model {
+            font-size: 10.5px; padding: 1px 7px; border-radius: 9px;
+            background: #f3f4f6; color: #4b5563;
+            font-family: ui-monospace, Menlo, monospace;
+        }
+
+        .prov-model.empty { background: #fef3c7; color: #92400e; }
+
+        .prov-selects { display: flex; gap: 14px; flex-wrap: wrap; }
+
+        .prov-sel { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #4b5563; }
+        .prov-sel select { padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; min-width: 190px; }
+
+        /* 添加 / 编辑提供商的表单 */
+        .prov-form-mask {
+            position: absolute; inset: 0; background: rgba(17, 24, 39, .45);
+            display: flex; align-items: center; justify-content: center; z-index: 30;
+            border-radius: inherit;
+        }
+
+        .prov-form {
+            background: #fff; border-radius: 10px; padding: 18px 20px;
+            width: min(520px, 92%); max-height: 90%; overflow-y: auto;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, .25);
+        }
+
+        .prov-form h4 { margin: 0 0 14px; font-size: 15px; }
+
+        .prov-form label {
+            display: block; margin-bottom: 11px; font-size: 12px; color: #374151;
+        }
+
+        .prov-form .req { color: #dc2626; }
+
+        .prov-form input[type="text"], .prov-form input[type="password"], .prov-form textarea {
+            display: block; width: 100%; margin-top: 4px; padding: 7px 9px;
+            border: 1px solid #d1d5db; border-radius: 6px; font-size: 12.5px;
+            font-family: inherit;
+        }
+
+        .prov-form textarea { font-family: ui-monospace, Menlo, monospace; resize: vertical; }
+
+        .prov-form input:focus, .prov-form textarea:focus {
+            outline: none; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, .12);
+        }
+
+        .pf-note { display: block; margin-top: 3px; font-size: 11px; color: #6b7280; }
+        .pf-check { display: flex; align-items: center; gap: 7px; }
+        .pf-check input { margin: 0; }
+
+        .pf-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+        .pf-result { margin-top: 10px; font-size: 12px; min-height: 16px; line-height: 1.6; }
+        .pf-result.ok { color: #15803d; }
+        .pf-result.err { color: #b91c1c; word-break: break-all; }
+
+        body.dark .prov-card { background: #1b1f27; border-color: #2a2f3a; }
+        body.dark .prov-name { color: #e5e7eb; }
+        body.dark .prov-model { background: #262b3a; color: #cbd5e1; }
+        body.dark .prov-empty { background: #1b1f27; border-color: #333a47; }
+        body.dark .prov-form { background: #1b1f27; }
+        body.dark .prov-form label { color: #cbd5e1; }
+        body.dark .prov-form input, body.dark .prov-form textarea {
+            background: #232833; border-color: #333a47; color: #e5e7eb;
+        }
+        body.dark .prov-sel select { background: #232833; border-color: #333a47; color: #e5e7eb; }
 
         /* ===== 只读 diff 视图（右侧面板）===== */
         .fp-diff {
@@ -3143,6 +3260,37 @@
     <div class="modal-overlay" id="settingsModal" style="display: none;"
         onclick="if(event.target===this) closeSettings()">
         <div class="modal-box settings-box">
+            <!-- 添加 / 编辑提供商的表单（叠在设置面板之上） -->
+            <div class="prov-form-mask" id="provFormMask" style="display: none;">
+                <div class="prov-form">
+                    <h4 id="provFormTitle">添加模型提供商</h4>
+                    <label>名称 <span class="req">*</span>
+                        <input type="text" id="pfName" placeholder="例如：我的 DeepSeek" autocomplete="off">
+                    </label>
+                    <label>Base URL <span class="req">*</span>
+                        <input type="text" id="pfUrl" placeholder="https://api.deepseek.com/v1"
+                               autocomplete="off" spellcheck="false">
+                    </label>
+                    <label>API Key
+                        <input type="password" id="pfKey" placeholder="sk-...（本地模型可留空）" autocomplete="off">
+                        <span class="pf-note" id="pfKeyNote"></span>
+                    </label>
+                    <label>模型名称 <span class="req">*</span>
+                        <textarea id="pfModels" rows="3"
+                            placeholder="每行一个，或逗号分隔&#10;deepseek-chat&#10;deepseek-reasoner"></textarea>
+                    </label>
+                    <label class="pf-check">
+                        <input type="checkbox" id="pfEmbedding">
+                        <span>支持 embedding（知识库可用这家做向量检索）</span>
+                    </label>
+                    <div class="pf-actions">
+                        <button class="fp-btn" onclick="closeProviderForm()">取消</button>
+                        <button class="fp-btn" id="pfTestBtn" onclick="testProviderForm(this)">测试连接</button>
+                        <button class="fp-btn primary" id="pfSaveBtn" onclick="submitProviderForm(this)">保存</button>
+                    </div>
+                    <div class="pf-result" id="pfResult"></div>
+                </div>
+            </div>
             <div class="modal-head">
                 <span>⚙️ 设置</span>
                 <button class="icon-btn" onclick="closeSettings()" title="关闭">✕</button>
@@ -3207,13 +3355,40 @@
                     </div>
                     <div class="spage" data-page="keys">
                     <section class="set-sec">
-                        <h4>🔑 API Key / Base URL</h4>
+                        <div class="prov-head">
+                            <h4 style="margin:0;">🔑 模型提供商</h4>
+                            <button class="fp-btn primary" onclick="openProviderForm()">＋ 添加模型提供商</button>
+                        </div>
+                        <p class="set-hint">
+                            这里配置的提供商就是全部 —— 代码里没有任何预设。
+                            想接哪家就加哪家，填名称、Base URL、API Key 与模型名称即可。
+                        </p>
                         <div id="providerKeys" class="key-list"></div>
+                    </section>
+
+                    <section class="set-sec" id="provDefaultsSec">
+                        <h4>🎯 默认与用途</h4>
+                        <div class="prov-selects">
+                            <label class="prov-sel">
+                                <span>默认提供商</span>
+                                <select id="provDefaultSel" onchange="setDefaultProvider(this.value)"></select>
+                            </label>
+                            <label class="prov-sel">
+                                <span>知识库用的嵌入模型</span>
+                                <select id="provRagSel" onchange="setRagProvider(this.value)"></select>
+                            </label>
+                        </div>
+                        <p class="set-hint">
+                            知识库（向量检索）需要一家支持 embedding 的提供商；
+                            不选则退到默认提供商。
+                        </p>
+                    </section>
+
+                    <section class="set-sec">
                         <p class="set-hint warn">
                             🔒 密钥只保存在<b>服务端</b>（<code>data/providers.json</code>，权限 600），
                             浏览器永远拿不到完整值，只显示掩码。<br>
-                            ⚠️ 改了 Base URL 就意味着密钥会被发到那个地址，请只填你信任的端点。<br>
-                            这里填的优先于 <code>.env</code>；清空即回退到 <code>.env</code>。
+                            ⚠️ Base URL 填什么，密钥就会被发到那个地址，请只填你信任的端点。
                         </p>
                     </section>
 
@@ -5571,6 +5746,18 @@
         const SETTINGS_PAGES = ["general", "keys", "agents", "mcp", "kb"];
         let currentSettingsPage = "general";
 
+        // 用户配置的模型提供商。**后端没有预设**，这几个变量是它们在前端的唯一来源。
+        // 待发送的附件（回形针按钮加进来的），必须在 runTask 之前声明
+        let pendingAttachments = [];   // [{name, path, size, chars}]
+
+        let providersData = [];      // 列表（不含完整密钥，只有 has_key / key_hint）
+        let providersDefault = "";   // 默认提供商的 id
+        let providersRag = "";       // 知识库（向量检索）用哪家
+        let currentProviderId = "";  // 当前选中的提供商
+        let currentModelName = "";   // 当前选中的模型
+        let currentPermission = 2;   // 当前会话的权限等级
+        let tokens = null;           // 最近一次的 token 用量（历史回显用）
+
         function showSettingsPage(name) {
             if (!SETTINGS_PAGES.includes(name)) name = "general";
             currentSettingsPage = name;
@@ -5933,53 +6120,133 @@
             if (j) hideMcpForm();
         }
 
-        /** 密钥区：只展示掩码，**任何时刻都不把完整密钥写进 DOM**。 */
+        // ============ 模型提供商管理 ============
+        // 提供商**全部由用户在这里定义**，后端不再有预设。
+        // 硬约束：完整密钥只进不出 —— 界面永远只显示掩码，保存时留空表示「不修改」。
+
+        /** 提供商列表：卡片式，每张卡能改、能删、能测、能设为默认/嵌入。 */
         function renderProviderKeys() {
             const box = document.getElementById("providerKeys");
             if (!box) return;
-            if (!providersData.length) { box.innerHTML = `<div class="set-hint">加载中…</div>`; return; }
-            box.innerHTML = providersData.map(p => `
-                <div class="key-row" data-pid="${p.id}">
-                    <div class="key-head">
-                        <span class="key-name">${p.icon} ${escapeHtml(p.name)}</span>
-                        <span class="key-state ${p.has_key ? "ok" : "miss"}">
-                            ${p.has_key ? "🔒 已配置 " + escapeHtml(p.key_hint || "") : "未配置"}
-                            ${p.from_settings ? "（界面设置）" : (p.has_key ? "（来自 .env）" : "")}
+
+            if (!providersData.length) {
+                box.innerHTML = `
+                    <div class="prov-empty">
+                        还没有配置任何模型提供商。<br>
+                        点右上角「＋ 添加模型提供商」，填入 Base URL、API Key 和模型名称即可开始使用。
+                    </div>`;
+                renderProviderSelects();
+                return;
+            }
+
+            box.innerHTML = providersData.map(p => {
+                const isDefault = p.id === providersDefault;
+                const isRag = p.id === providersRag;
+                const models = (p.models || []).map(m =>
+                    `<span class="prov-model">${escapeHtml(m)}</span>`).join("");
+                return `
+                <div class="prov-card" data-pid="${p.id}">
+                    <div class="prov-top">
+                        <span class="prov-icon">${p.icon || "🧠"}</span>
+                        <span class="prov-name">${escapeHtml(p.name)}</span>
+                        ${isDefault ? '<span class="prov-tag def">默认</span>' : ""}
+                        ${isRag ? '<span class="prov-tag rag">嵌入</span>' : ""}
+                        <span class="prov-state ${p.has_key ? "ok" : "miss"}">
+                            ${p.has_key ? "🔒 " + escapeHtml(p.key_hint || "已配置") : "⚠️ 未配置密钥"}
+                        </span>
+                        <span class="prov-ops">
+                            <button class="fp-btn" onclick="testProvider('${p.id}', this)"
+                                    title="真发一次最小请求验证">测试</button>
+                            <button class="fp-btn" onclick="openProviderForm('${p.id}')">编辑</button>
+                            <button class="fp-btn danger" onclick="deleteProviderCfg('${p.id}')">删除</button>
                         </span>
                     </div>
-                    <div class="key-fields">
-                        <input type="password" class="key-input" autocomplete="off"
-                            placeholder="${p.has_key ? "留空则不修改" : "填入 API Key"}">
-                        <input type="text" class="url-input" autocomplete="off" spellcheck="false"
-                            value="${escapeHtml(p.base_url || "")}" placeholder="Base URL">
-                        <button class="fp-btn primary" onclick="saveProviderKey('${p.id}', this)">保存</button>
-                        ${p.has_key ? `<button class="fp-btn danger" onclick="clearProviderKey('${p.id}')">清除</button>` : ""}
-                    </div>
-                </div>`).join("");
+                    <div class="prov-url">${escapeHtml(p.base_url || "（未填 Base URL）")}</div>
+                    <div class="prov-models">${models || '<span class="prov-model empty">（未填模型）</span>'}</div>
+                </div>`;
+            }).join("");
+            renderProviderSelects();
         }
 
-        async function saveProviderKey(pid, btn) {
-            const row = btn.closest(".key-row");
-            const keyInput = row.querySelector(".key-input");
-            const urlInput = row.querySelector(".url-input");
-            const payload = { provider_id: pid, base_url: urlInput.value.trim() };
-            const kv = keyInput.value.trim();
-            if (kv) payload.api_key = kv;      // 留空表示「不修改」
+        /** 默认 / 嵌入两个下拉。 */
+        function renderProviderSelects() {
+            const mk = (sel, cur, allowEmpty) => {
+                if (!sel) return;
+                const opts = providersData.map(p =>
+                    `<option value="${p.id}" ${p.id === cur ? "selected" : ""}>${escapeHtml(p.name)}</option>`);
+                sel.innerHTML = (allowEmpty ? `<option value="">（不指定）</option>` : "") + opts.join("");
+                if (allowEmpty) sel.value = cur || "";
+            };
+            mk(document.getElementById("provDefaultSel"), providersDefault, false);
+            mk(document.getElementById("provRagSel"), providersRag, true);
+            const sec = document.getElementById("provDefaultsSec");
+            if (sec) sec.style.display = providersData.length ? "" : "none";
+        }
+
+        // ---- 添加 / 编辑表单 ----
+
+        let provEditingId = null;
+
+        function openProviderForm(pid) {
+            provEditingId = pid || null;
+            const p = pid ? providersData.find(x => x.id === pid) : null;
+            document.getElementById("provFormTitle").textContent =
+                p ? `编辑「${p.name}」` : "添加模型提供商";
+            document.getElementById("pfName").value = p ? p.name : "";
+            document.getElementById("pfUrl").value = p ? (p.base_url || "") : "";
+            document.getElementById("pfKey").value = "";     // 永不回显密钥
+            document.getElementById("pfKeyNote").textContent = p && p.has_key
+                ? `已配置（${p.key_hint}）—— 留空则不修改` : "";
+            document.getElementById("pfModels").value = p ? (p.models || []).join("\n") : "";
+            document.getElementById("pfEmbedding").checked = !!(p && p.supports_embedding);
+            document.getElementById("pfResult").textContent = "";
+            document.getElementById("provFormMask").style.display = "flex";
+            setTimeout(() => document.getElementById("pfName").focus(), 50);
+        }
+
+        function closeProviderForm() {
+            document.getElementById("provFormMask").style.display = "none";
+            provEditingId = null;
+        }
+
+        function _providerFormPayload() {
+            return {
+                id: provEditingId || undefined,
+                name: document.getElementById("pfName").value.trim(),
+                base_url: document.getElementById("pfUrl").value.trim(),
+                api_key: document.getElementById("pfKey").value.trim(),   // 空 = 不修改
+                models: document.getElementById("pfModels").value,
+                supports_embedding: document.getElementById("pfEmbedding").checked,
+            };
+        }
+
+        function _applyProviderResponse(j) {
+            providersData = j.providers || [];
+            providersDefault = j.default || "";
+            providersRag = j.rag_provider || "";
+            renderProviderKeys();
+            MODEL_PICKER_TARGETS.forEach(t => renderModelPickerDropdown(t.dd));
+            if (multiAgentMode) initRoleSelection();
+        }
+
+        async function submitProviderForm(btn) {
+            const payload = _providerFormPayload();
+            if (!payload.name) { alert("请填写名称"); return; }
+            if (!payload.base_url) { alert("请填写 Base URL"); return; }
+            // 不强制 API Key —— 本地模型（Ollama / LM Studio）不需要
+            if (!payload.models.trim()) { alert("请填写至少一个模型名称"); return; }
 
             btn.disabled = true;
             try {
-                const res = await fetch("/api/settings/keys", {
+                const res = await fetch("/api/providers", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(payload),
                 });
                 const j = await res.json();
                 if (!j.ok) { alert(j.error || "保存失败"); return; }
-                keyInput.value = "";          // 立刻清空，不在 DOM 里留着密钥
-                providersData = j.providers || providersData;
-                renderProviderKeys();
-                MODEL_PICKER_TARGETS.forEach(t => renderModelPickerDropdown(t.dd));
-                if (multiAgentMode) initRoleSelection();
+                _applyProviderResponse(j);
+                closeProviderForm();
             } catch (e) {
                 alert("保存失败：" + e.message);
             } finally {
@@ -5987,33 +6254,90 @@
             }
         }
 
-        async function clearProviderKey(pid) {
-            if (!confirm("清除这个 provider 在界面里保存的密钥？\n（.env 里的仍然生效）")) return;
+        /** 测试连接：真的发一次请求 —— 只校验格式发现不了「URL 少了 /v1」。 */
+        async function testProviderForm(btn) {
+            const payload = _providerFormPayload();
+            const out = document.getElementById("pfResult");
+            if (!payload.base_url) { out.textContent = "请先填 Base URL"; return; }
+            if (!payload.api_key && !provEditingId) { out.textContent = "请先填 API Key"; return; }
+            const first = String(payload.models || "").split(/[,\n]/).map(x => x.trim())
+                .filter(Boolean)[0] || "";
+            if (!first) { out.textContent = "请先填模型名称"; return; }
+
+            btn.disabled = true;
+            out.className = "pf-result";
+            out.textContent = "正在测试…";
             try {
-                const res = await fetch(`/api/settings/keys/${pid}`, { method: "DELETE" });
+                const res = await fetch("/api/providers/test", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ...payload, model: first }),
+                });
                 const j = await res.json();
-                if (!j.ok) { alert(j.error || "清除失败"); return; }
-                providersData = j.providers || providersData;
-                renderProviderKeys();
-                MODEL_PICKER_TARGETS.forEach(t => renderModelPickerDropdown(t.dd));
-                if (multiAgentMode) initRoleSelection();
+                out.className = "pf-result " + (j.ok ? "ok" : "err");
+                out.textContent = j.ok ? ("✅ " + j.message) : ("❌ " + j.error);
             } catch (e) {
-                alert("清除失败：" + e.message);
+                out.className = "pf-result err";
+                out.textContent = "❌ 测试失败：" + e.message;
+            } finally {
+                btn.disabled = false;
             }
         }
 
-        // ===== 会话权限等级 =====
-        // 等级存在服务端（sessions 表），这里只是展示与切换；前端传什么都不作数。
-        const PERM_LABELS = { 1: "只读", 2: "确认", 3: "完全" };
-        let currentPermission = 2;
+        async function testProvider(pid, btn) {
+            btn.disabled = true;
+            const old = btn.textContent;
+            btn.textContent = "测试中…";
+            try {
+                const res = await fetch("/api/providers/test", {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ id: pid }),
+                });
+                const j = await res.json();
+                alert(j.ok ? `✅ ${j.message}` : `❌ ${j.error}`);
+            } catch (e) {
+                alert("测试失败：" + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = old;
+            }
+        }
 
-        function renderPermission() {
-            document.querySelectorAll("#permSwitch .perm-btn").forEach(b => {
-                const on = Number(b.dataset.level) === currentPermission;
-                b.classList.toggle("active", on);
+        async function deleteProviderCfg(pid) {
+            const p = providersData.find(x => x.id === pid);
+            if (!confirm(`删除提供商「${p ? p.name : pid}」？\n它的密钥也会一并从服务端删除。`)) return;
+            try {
+                const res = await fetch(`/api/providers/${encodeURIComponent(pid)}`, { method: "DELETE" });
+                const j = await res.json();
+                if (!j.ok) { alert(j.error || "删除失败"); return; }
+                _applyProviderResponse(j);
+            } catch (e) {
+                alert("删除失败：" + e.message);
+            }
+        }
+
+        async function setDefaultProvider(pid) {
+            if (!pid) return;
+            const res = await fetch("/api/providers/default", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: pid }),
             });
-            const box = document.getElementById("permSwitch");
-            if (box) box.dataset.level = String(currentPermission);
+            const j = await res.json();
+            if (!j.ok) { alert(j.error || "设置失败"); return; }
+            providersDefault = j.default;
+            renderProviderKeys();
+            MODEL_PICKER_TARGETS.forEach(t => renderModelPickerDropdown(t.dd));
+        }
+
+        async function setRagProvider(pid) {
+            const res = await fetch("/api/providers/rag", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: pid }),
+            });
+            const j = await res.json();
+            if (!j.ok) { alert(j.error || "设置失败"); return; }
+            providersRag = j.rag_provider || "";
+            renderProviderKeys();
         }
 
         async function loadPermission() {
@@ -6025,6 +6349,140 @@
             } catch (e) {
                 console.warn("[PERM] 读取失败", e);
             }
+        }
+
+        function clearAttachments() {
+            pendingAttachments = [];
+            renderAttachStrip();
+        }
+
+        /** 下载文件到浏览器默认下载目录（本机实测为 /home/pz/下载）。 */
+        function downloadPath(path, name) {
+            const url = `/api/download?path=${encodeURIComponent(path)}`
+                + `&name=${encodeURIComponent(name || "")}`;
+            // 走 fetch + Blob 才能带上 X-Auth-Token（导航式下载带不了自定义头）
+            fetch(url)
+                .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.blob(); })
+                .then(blob => {
+                    const a = document.createElement("a");
+                    a.href = URL.createObjectURL(blob);
+                    a.download = name || String(path).split("/").pop();
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+                })
+                .catch(e => alert("下载失败：" + e.message));
+        }
+
+        function clearImages() {
+            pendingImages = [];
+            renderImagePreview();
+        }
+
+        function addImageFiles(files) {
+            const list = Array.from(files || []);
+            for (const file of list) {
+                if (!file.type || !file.type.startsWith("image/")) continue;
+                if (file.size > MAX_IMAGE_BYTES) {
+                    alert(`图片过大：${file.name || "image"}（${(file.size / 1024 / 1024).toFixed(1)}MB），上限 10MB`);
+                    continue;
+                }
+                compressImage(file, 1024, 0.85)
+                    .then(dataUrl => {
+                        pendingImages.push({ dataUrl, name: file.name || "image" });
+                        renderImagePreview();
+                    })
+                    .catch(err => {
+                        console.warn("[IMG] 压缩失败，跳过：", err);
+                        alert(`图片处理失败：${file.name || "image"}`);
+                    });
+            }
+        }
+
+        function closeLightbox(e) {
+            // 点击图片本身不关闭，只有点击遮罩层才关闭
+            if (e && e.target && e.target.id === "imgLightboxSrc") return;
+            const box = document.getElementById("imgLightbox");
+            if (box) box.classList.remove("show");
+        }
+
+        /** 回形针统一入口：按类型分流。 */
+        async function handleAttachFiles(files) {
+            const list = Array.from(files || []);
+            const images = list.filter(f => f.type && f.type.startsWith("image/"));
+            const docs = list.filter(f => !(f.type && f.type.startsWith("image/")));
+            if (images.length) addImageFiles(images);
+            for (const f of docs) await uploadAttachment(f);
+            // 允许连续选择同一个文件
+            const input = document.getElementById("attachInput");
+            if (input) input.value = "";
+        }
+
+        function openLightbox(src) {
+            const box = document.getElementById("imgLightbox");
+            const img = document.getElementById("imgLightboxSrc");
+            if (!box || !img) return;
+            img.src = src;
+            box.classList.add("show");
+        }
+
+        function removeAttachment(index) {
+            pendingAttachments.splice(index, 1);
+            renderAttachStrip();
+        }
+
+        function removeImage(index) {
+            pendingImages.splice(index, 1);
+            renderImagePreview();
+        }
+
+        function renderAttachStrip() {
+            const box = document.getElementById("attachStrip");
+            if (!box) return;
+            if (!pendingAttachments.length) {
+                box.style.display = "none";
+                box.innerHTML = "";
+                return;
+            }
+            box.style.display = "flex";
+            box.innerHTML = pendingAttachments.map((a, i) => `
+                <span class="attach-chip" title="${escapeHtml(a.path)}">
+                    <span class="attach-name">📄 ${escapeHtml(a.name)}</span>
+                    <span class="attach-size">${a.size < 1024 ? a.size + " B" : (a.size / 1024).toFixed(1) + " KB"}</span>
+                    <button type="button" onclick="openFile('${escapeHtml(a.path).replace(/'/g, "\\'")}')"
+                        title="在右侧面板打开">打开</button>
+                    <button type="button" onclick="downloadPath('${escapeHtml(a.path).replace(/'/g, "\\'")}', '${escapeHtml(a.name).replace(/'/g, "\\'")}')"
+                        title="下载（存到系统「下载」目录）">⬇</button>
+                    <button type="button" class="attach-del" onclick="removeAttachment(${i})"
+                        title="移除">✕</button>
+                </span>`).join("");
+        }
+
+        function renderImagePreview() {
+            const box = document.getElementById("imagePreview");
+            if (!box) return;
+            if (!pendingImages.length) {
+                box.style.display = "none";
+                box.innerHTML = "";
+                return;
+            }
+            box.style.display = "flex";
+            box.innerHTML = pendingImages.map((img, i) => `
+                <div class="img-thumb" title="${escapeHtml(img.name)}">
+                    <img src="${img.dataUrl}" alt="${escapeHtml(img.name)}" onclick="openLightbox('${img.dataUrl}')">
+                    <button type="button" class="img-thumb-del" onclick="removeImage(${i})" title="移除">×</button>
+                </div>
+            `).join("");
+        }
+
+        function renderPermission() {
+            document.querySelectorAll("#permSwitch .perm-btn").forEach(b => {
+                const on = Number(b.dataset.level) === currentPermission;
+                b.classList.toggle("active", on);
+            });
+            const box = document.getElementById("permSwitch");
+            if (box) box.dataset.level = String(currentPermission);
         }
 
         async function setPermission(level) {
@@ -6054,43 +6512,6 @@
             }
         }
 
-        // ===== 附件（文本文档 + 图片）=====
-        // 图片：前端压缩后内联 data URL 走多模态（省 token，且刷新后能从历史回显）
-        // 文档：POST /api/attach 抽取正文并落盘，Agent 可 read_file / edit_file 它
-        let pendingAttachments = [];   // [{name, path, size, chars}]
-
-        function addImageFiles(files) {
-            const list = Array.from(files || []);
-            for (const file of list) {
-                if (!file.type || !file.type.startsWith("image/")) continue;
-                if (file.size > MAX_IMAGE_BYTES) {
-                    alert(`图片过大：${file.name || "image"}（${(file.size / 1024 / 1024).toFixed(1)}MB），上限 10MB`);
-                    continue;
-                }
-                compressImage(file, 1024, 0.85)
-                    .then(dataUrl => {
-                        pendingImages.push({ dataUrl, name: file.name || "image" });
-                        renderImagePreview();
-                    })
-                    .catch(err => {
-                        console.warn("[IMG] 压缩失败，跳过：", err);
-                        alert(`图片处理失败：${file.name || "image"}`);
-                    });
-            }
-        }
-
-        /** 回形针统一入口：按类型分流。 */
-        async function handleAttachFiles(files) {
-            const list = Array.from(files || []);
-            const images = list.filter(f => f.type && f.type.startsWith("image/"));
-            const docs = list.filter(f => !(f.type && f.type.startsWith("image/")));
-            if (images.length) addImageFiles(images);
-            for (const f of docs) await uploadAttachment(f);
-            // 允许连续选择同一个文件
-            const input = document.getElementById("attachInput");
-            if (input) input.value = "";
-        }
-
         async function uploadAttachment(file) {
             const fd = new FormData();
             fd.append("file", file);
@@ -6108,132 +6529,32 @@
             }
         }
 
-        function clearAttachments() {
-            pendingAttachments = [];
-            renderAttachStrip();
-        }
-
-        function removeAttachment(index) {
-            pendingAttachments.splice(index, 1);
-            renderAttachStrip();
-        }
-
-        function renderAttachStrip() {
-            const box = document.getElementById("attachStrip");
-            if (!box) return;
-            if (!pendingAttachments.length) {
-                box.style.display = "none";
-                box.innerHTML = "";
-                return;
-            }
-            box.style.display = "flex";
-            box.innerHTML = pendingAttachments.map((a, i) => `
-                <span class="attach-chip" title="${escapeHtml(a.path)}">
-                    <span class="attach-name">📄 ${escapeHtml(a.name)}</span>
-                    <span class="attach-size">${a.size < 1024 ? a.size + " B" : (a.size / 1024).toFixed(1) + " KB"}</span>
-                    <button type="button" onclick="openFile('${escapeHtml(a.path).replace(/'/g, "\\'")}')"
-                        title="在右侧面板打开">打开</button>
-                    <button type="button" onclick="downloadPath('${escapeHtml(a.path).replace(/'/g, "\\'")}', '${escapeHtml(a.name).replace(/'/g, "\\'")}')"
-                        title="下载（存到系统「下载」目录）">⬇</button>
-                    <button type="button" class="attach-del" onclick="removeAttachment(${i})"
-                        title="移除">✕</button>
-                </span>`).join("");
-        }
-
-        /** 下载文件到浏览器默认下载目录（本机实测为 /home/pz/下载）。 */
-        function downloadPath(path, name) {
-            const url = `/api/download?path=${encodeURIComponent(path)}`
-                + `&name=${encodeURIComponent(name || "")}`;
-            // 走 fetch + Blob 才能带上 X-Auth-Token（导航式下载带不了自定义头）
-            fetch(url)
-                .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.blob(); })
-                .then(blob => {
-                    const a = document.createElement("a");
-                    a.href = URL.createObjectURL(blob);
-                    a.download = name || String(path).split("/").pop();
-                    document.body.appendChild(a);
-                    a.click();
-                    a.remove();
-                    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-                })
-                .catch(e => alert("下载失败：" + e.message));
-        }
-
-        function removeImage(index) {
-            pendingImages.splice(index, 1);
-            renderImagePreview();
-        }
-
-        function renderImagePreview() {
-            const box = document.getElementById("imagePreview");
-            if (!box) return;
-            if (!pendingImages.length) {
-                box.style.display = "none";
-                box.innerHTML = "";
-                return;
-            }
-            box.style.display = "flex";
-            box.innerHTML = pendingImages.map((img, i) => `
-                <div class="img-thumb" title="${escapeHtml(img.name)}">
-                    <img src="${img.dataUrl}" alt="${escapeHtml(img.name)}" onclick="openLightbox('${img.dataUrl}')">
-                    <button type="button" class="img-thumb-del" onclick="removeImage(${i})" title="移除">×</button>
-                </div>
-            `).join("");
-        }
-
-        function clearImages() {
-            pendingImages = [];
-            renderImagePreview();
-        }
-
-        function openLightbox(src) {
-            const box = document.getElementById("imgLightbox");
-            const img = document.getElementById("imgLightboxSrc");
-            if (!box || !img) return;
-            img.src = src;
-            box.classList.add("show");
-        }
-
-        function closeLightbox(e) {
-            // 点击图片本身不关闭，只有点击遮罩层才关闭
-            if (e && e.target && e.target.id === "imgLightboxSrc") return;
-            const box = document.getElementById("imgLightbox");
-            if (box) box.classList.remove("show");
-        }
-
-        // 粘贴图片：仅在输入框聚焦时生效
-        document.addEventListener("paste", e => {
-            const taskEl = document.getElementById("task");
-            if (!taskEl || document.activeElement !== taskEl) return;
-            const items = (e.clipboardData && e.clipboardData.items) || [];
-            const files = [];
-            for (const item of items) {
-                if (item.type && item.type.startsWith("image/")) {
-                    const f = item.getAsFile();
-                    if (f) files.push(f);
-                }
-            }
-            if (files.length) {
-                e.preventDefault();
-                addImageFiles(files);   // 函数已改名为 addImageFiles，这里漏改过
-            }
-        });
-
-        // ============ 模型选择器 ============
-        let providersData = [];
-        let currentProviderId = "";
-        let currentModelName = "";
-
         async function loadProviders() {
             try {
                 const res = await fetch("/api/providers");
                 const data = await res.json();
                 providersData = data.providers || [];
+                providersDefault = data.default || "";
+                providersRag = data.rag_provider || "";
+
+                // 一个提供商都没配：不要卡在「加载中」，直接引导用户去添加
+                if (!providersData.length) {
+                    currentProviderId = "";
+                    currentModelName = "";
+                    MODEL_PICKER_TARGETS.forEach(t => {
+                        const el = document.getElementById(t.label);
+                        if (el) el.textContent = "未配置模型";
+                        const ic = document.getElementById(t.icon);
+                        if (ic) ic.textContent = "⚠️";
+                    });
+                    renderProviderKeys();
+                    return;
+                }
 
                 // 从 localStorage 恢复上次选择，或使用默认
                 const savedPid = localStorage.getItem("providerId");
                 const savedModel = localStorage.getItem("modelName");
-                const defaultPid = data.default || (providersData[0] && providersData[0].id);
+                const defaultPid = providersDefault || (providersData[0] && providersData[0].id);
 
                 if (savedPid && providersData.find(p => p.id === savedPid)) {
                     currentProviderId = savedPid;
@@ -6261,6 +6582,7 @@
         ];
 
         function updateModelPickerUI() {
+            if (!providersData.length) return;      // 空列表由 loadProviders 统一提示
             const p = providersData.find(x => x.id === currentProviderId);
             if (!p) return;
             MODEL_PICKER_TARGETS.forEach(t => {

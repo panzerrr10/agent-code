@@ -21,7 +21,7 @@ import pytest
 import reviewer
 import runtime
 import tools
-from config_providers import PROVIDERS, get_extra_body, get_provider_id_by_base_url
+from config_providers import get_extra_body, get_provider_id_by_base_url
 from paths import is_allowed_path, is_path_permitted
 
 HOME = os.path.expanduser("~")
@@ -65,31 +65,50 @@ def test_is_path_permitted_still_rejects_sensitive_inside_root():
 # ============ 多 provider 参数条件化 ============
 
 
-def test_extra_body_only_for_deepseek():
-    assert get_extra_body("deepseek") == {
-        "enable_search": True,
-        "search_options": {"search_strategy": "turbo"},
-    }
-    for pid in ("bailian", "zhipu", "openai"):
-        assert get_extra_body(pid) == {}
-    # 未知 provider 绝不猜测，返回空
-    assert get_extra_body("not-exist") == {}
 
+def test_provider_id_inferred_from_base_url(client):
+    """按 base_url 反查 provider —— 用户自定义提供商时 id 是随便起的，
+    所以这个反查只能靠 URL 匹配，不能靠写死的 id 表。"""
+    import config_providers as cp
 
-def test_provider_id_inferred_from_base_url():
+    cp.add_provider({"id": "openai", "name": "OpenAI",
+                     "base_url": "https://api.openai.com/v1", "models": ["gpt-4o"]})
+    cp.add_provider({"id": "bailian", "name": "百炼",
+                     "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                     "models": ["qwen-plus"]})
+    cp.add_provider({"id": "deepseek", "name": "DeepSeek",
+                     "base_url": "https://api.deepseek.com/v1", "models": ["deepseek-chat"]})
+
     assert get_provider_id_by_base_url("https://api.openai.com/v1") == "openai"
-    assert (
-        get_provider_id_by_base_url(
-            "https://dashscope.aliyuncs.com/compatible-mode/v1"
-        )
-        == "bailian"
-    )
+    assert get_provider_id_by_base_url(
+        "https://dashscope.aliyuncs.com/compatible-mode/v1") == "bailian"
     assert get_provider_id_by_base_url("https://api.deepseek.com/v1") == "deepseek"
-    assert get_provider_id_by_base_url("") == "deepseek"
+    # 认不出来时退到默认（第一个），绝不猜
+    assert get_provider_id_by_base_url("") == cp.get_default_provider_id()
+    assert get_provider_id_by_base_url("https://who.example/v1") == cp.get_default_provider_id()
+
+
+def test_extra_body_only_for_deepseek(client):
+    """只有 DeepSeek 认 enable_search，别家收到会 400 —— 必须条件化下发。
+
+    **按 base_url 判断而不是按 id**：用户可以把提供商叫任何名字。
+    """
+    import config_providers as cp
+
+    cp.add_provider({"id": "whatever", "name": "随便叫",
+                     "base_url": "https://api.deepseek.com/v1", "models": ["m"]})
+    cp.add_provider({"id": "other", "name": "别家",
+                     "base_url": "https://api.moonshot.cn/v1", "models": ["m"]})
+    assert get_extra_body("whatever") == {
+        "enable_search": True, "search_options": {"search_strategy": "turbo"}}
+    assert get_extra_body("other") == {}, "别家绝不能收到 enable_search"
 
 
 def test_model_names_are_not_placeholders():
-    for pid, p in PROVIDERS.items():
+    """内置的旧预设只能用于一次性迁移，里面的模型名必须是真实可用的。"""
+    import config_providers as cp
+
+    for pid, p in cp._LEGACY_PRESETS.items():
         assert p["models"], f"{pid} 模型列表为空"
         assert p["default_model"] in p["models"], f"{pid} 默认模型不在列表内"
         for name in p["models"]:

@@ -35,8 +35,8 @@ def _stub_provider(monkeypatch):
     """让 provider 与 LLM 客户端脱离 .env / 网络。"""
     import agent
 
-    monkeypatch.setattr(app_module, "get_provider", lambda pid: dict(PROVIDER_CFG))
-    monkeypatch.setattr(agent, "get_provider", lambda pid: dict(PROVIDER_CFG))
+    monkeypatch.setattr(app_module, "get_provider", lambda pid=None: dict(PROVIDER_CFG))
+    monkeypatch.setattr(agent, "get_provider", lambda pid=None: dict(PROVIDER_CFG))
     monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
 
 
@@ -112,12 +112,28 @@ def test_session_lifecycle_and_history(client):
 
 
 def test_providers_endpoint_never_leaks_api_key(client):
+    """provider 列表绝不能带 api_key。
+
+    **不要依赖 .env**：这个测试原来断言 `default == "deepseek"`，
+    而那个默认值是 .env 迁移出来的 —— .env 被 gitignore，干净检出里没有，
+    于是「本地全绿、CI 必红」。这里自己建一个提供商，跑在哪儿结果都一样。
+    """
+    secret = "sk-leak-check-abcdefghijklmnop123456"
+    r = client.post("/api/providers", json={
+        "name": "泄露检查", "base_url": "https://x.example/v1",
+        "api_key": secret, "models": ["m-1"],
+    })
+    assert r.get_json()["ok"]
+
+    new_id = r.get_json()["providers"][0]["id"]
     body = client.get("/api/providers").get_json()
-    assert body["default"] == "deepseek"
-    assert body["rag_provider"] == "bailian"
+    assert body["default"] == new_id, f"新建的第一个提供商应成为默认：{body['default']}"
+    assert body["providers"], "应该能读回刚建的提供商"
     for p in body["providers"]:
         assert "api_key" not in p, "provider 列表泄露了 api_key"
         assert {"id", "name", "models", "default_model", "has_key"} <= set(p)
+    # 整个响应体里也不能出现明文密钥
+    assert secret not in client.get("/api/providers").get_data(as_text=True)
 
 
 def test_permission_gates_on_read_endpoints(client):

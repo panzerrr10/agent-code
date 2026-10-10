@@ -141,6 +141,44 @@ def test_no_calls_to_undefined_functions():
     )
 
 
+def _called_from_html_attrs(html: str) -> set:
+    """找出 HTML 内联属性里调用的函数：``onclick="foo(1)"`` 之类。
+
+    **这个检查是补上一个真实漏洞的**：上面的 ``_called_names`` 只扫 JS 源码，
+    而界面上大量交互是写在 HTML 属性里的（``onclick="setPermission(3)"``）。
+    结果我删掉一个函数定义时，JS 里的调用点已经一并删了、检查通过，
+    **但 HTML 里还指着它** —— 用户一点那个按钮就报错。
+    当时漏掉的正是权限等级按钮和附件/图片那一串函数。
+    """
+    called = set()
+    for m in re.finditer(r"""\bon[a-z]+\s*=\s*(?:"([^"]*)"|'([^']*)')""", html):
+        body = m.group(1) or m.group(2) or ""
+        # 排除 obj.method() —— 只关心裸标识符调用
+        for c in re.finditer(r"([.\w$]?)\b([A-Za-z_$][\w$]*)\s*\(", body):
+            if c.group(1) == ".":
+                continue
+            called.add(c.group(2))
+    return called
+
+
+def test_html_inline_handlers_reference_real_functions():
+    """HTML 内联 onclick/onchange 里调用的函数必须真的存在。"""
+    with open(INDEX, encoding="utf-8") as f:
+        html = f.read()
+    js = _inline_js()
+
+    called = _called_from_html_attrs(html)
+    defined = _defined_names(js) | BUILTINS | KNOWN_DYNAMIC
+    missing = sorted(
+        n for n in called
+        if n not in defined and not _loosely_defined(js, n)
+    )
+    assert not missing, (
+        "这些函数被 HTML 内联属性调用，但没有定义（点那个按钮就会报错）：\n  "
+        + "\n  ".join(missing)
+    )
+
+
 def _loosely_defined(js: str, name: str) -> bool:
     """宽松判断：只要出现过 `name =` / `name:` / `name(` 的赋值或定义形式就算有。"""
     esc = re.escape(name)
@@ -250,3 +288,73 @@ def test_sse_errors_are_not_silently_swallowed():
     assert "catch" in consumer, "consumeSseStream 应当捕获事件处理异常"
     assert "console.error" in consumer or "console.warn" in consumer, \
         "捕获了却什么都不打 —— 这正是上次藏住 ReferenceError 的原因"
+
+
+# ============ 变量声明 ============
+
+JS_KEYWORDS = {
+    "if", "for", "while", "return", "typeof", "new", "var", "let", "const", "case",
+    "delete", "void", "in", "of", "do", "else", "try", "finally", "throw", "yield",
+    "await", "switch", "catch", "default", "instanceof", "function", "class",
+}
+
+
+def _declared_vars(js: str) -> set:
+    """所有被声明过的标识符：let/const/var（含同行多声明与解构）、函数、参数、catch、for-of。"""
+    declared = set()
+    for m in re.finditer(r"\b(?:let|const|var)\s+([^;{}\n]*)", js):
+        for part in m.group(1).split(","):
+            name = part.split("=")[0].strip()
+            if re.fullmatch(r"[A-Za-z_$][\w$]*", name):
+                declared.add(name)
+            declared.update(re.findall(r"[{[]\s*([A-Za-z_$][\w$]*)", part))
+    declared |= set(re.findall(r"\bfunction\s+([A-Za-z_$][\w$]*)", js))
+    declared |= set(re.findall(r"\bclass\s+([A-Za-z_$][\w$]*)", js))
+    for m in re.finditer(r"\bfunction\s*[A-Za-z_$\w]*\s*\(([^)]*)\)", js):
+        for x in m.group(1).split(","):
+            n = x.strip().split("=")[0].strip().lstrip(".")
+            if re.fullmatch(r"[A-Za-z_$][\w$]*", n):
+                declared.add(n)
+    for m in re.finditer(r"\(([^()]*)\)\s*=>", js):
+        for x in m.group(1).split(","):
+            n = x.strip().split("=")[0].strip()
+            if re.fullmatch(r"[A-Za-z_$][\w$]*", n):
+                declared.add(n)
+        declared.update(re.findall(r"[{[]\s*([A-Za-z_$][\w$]*)", m.group(1)))
+    for m in re.finditer(r"([A-Za-z_$][\w$]*)\s*=>", js):
+        declared.add(m.group(1))
+    declared |= set(re.findall(r"\bcatch\s*\(\s*([A-Za-z_$][\w$]*)", js))
+    declared |= set(re.findall(r"\bfor\s*\(\s*(?:let|const|var)\s+([A-Za-z_$][\w$]*)", js))
+    return declared
+
+
+def test_no_assignment_to_undeclared_variable():
+    """给一个没声明过的变量赋值 = 制造了一个隐式全局。
+
+    松散模式下浏览器不报错，但**它是真实的定时炸弹**：
+    - 从一个作用域泄漏到全局，和别的代码串味
+    - 一旦哪天上 strict mode / 打包，立刻 ReferenceError
+
+    真实事故：一次大范围重构中，`let pendingAttachments = []` 和
+    `let currentProviderId = ""` 这四行声明被连带删掉了，而引用还在。
+    函数级的「调用了未定义的函数」检查**完全看不到变量**，
+    是浏览器里跑真实任务才炸出 `pendingAttachments is not defined` 的。
+    """
+    js = _inline_js()
+    stripped = re.sub(r"//[^\n]*", "", js)
+    stripped = re.sub(r"/\*.*?\*/", "", stripped, flags=re.S)
+    stripped = re.sub(r"`(?:\\.|[^`\\])*`", '""', stripped, flags=re.S)
+    stripped = re.sub(r"'(?:\\.|[^'\\])*'", '""', stripped)
+    stripped = re.sub(r'"(?:\\.|[^"\\])*"', '""', stripped)
+
+    assigned = set()
+    for m in re.finditer(r"(^|[;{}\n])\s*([A-Za-z_$][\w$]*)\s*=(?!=)", stripped):
+        assigned.add(m.group(2))
+    assigned -= JS_KEYWORDS
+
+    declared = _declared_vars(stripped) | JS_KEYWORDS | BUILTINS
+    missing = sorted(n for n in assigned if n not in declared)
+    assert not missing, (
+        "这些变量被赋值但从未声明（会变成隐式全局，且 strict mode 下直接报错）：\n  "
+        + "\n  ".join(missing)
+    )

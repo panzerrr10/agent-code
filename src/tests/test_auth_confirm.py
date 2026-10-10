@@ -56,8 +56,8 @@ def project(monkeypatch):
 def _stub_provider(monkeypatch):
     import app as app_module
 
-    monkeypatch.setattr(app_module, "get_provider", lambda pid: dict(PROVIDER_CFG))
-    monkeypatch.setattr(agent, "get_provider", lambda pid: dict(PROVIDER_CFG))
+    monkeypatch.setattr(app_module, "get_provider", lambda pid=None: dict(PROVIDER_CFG))
+    monkeypatch.setattr(agent, "get_provider", lambda pid=None: dict(PROVIDER_CFG))
 
 
 class _Delta:

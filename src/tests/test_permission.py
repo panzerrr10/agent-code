@@ -441,8 +441,8 @@ def test_run_endpoint_uses_server_side_level(client, monkeypatch):
     sid = client.post("/sessions", json={}).get_json()["id"]
     client.post(f"/sessions/{sid}/permission", json={"level": 1})
 
-    monkeypatch.setattr(app_module, "get_provider", lambda pid: dict(PROVIDER_CFG))
-    monkeypatch.setattr(agent, "get_provider", lambda pid: dict(PROVIDER_CFG))
+    monkeypatch.setattr(app_module, "get_provider", lambda pid=None: dict(PROVIDER_CFG))
+    monkeypatch.setattr(agent, "get_provider", lambda pid=None: dict(PROVIDER_CFG))
     monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
     monkeypatch.setattr(
         agent, "call_llm_with_retry",

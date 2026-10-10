@@ -9,7 +9,7 @@ from config import (
     MAX_STEPS,
 )
 from config_providers import (
-    DEFAULT_PROVIDER,
+    get_default_provider_id,
     get_extra_body,
     get_provider,
     get_provider_id_by_base_url,
@@ -20,10 +20,11 @@ from utils import call_llm_with_retry, get_llm_client
 
 def _get_default_client():
     """按默认 provider 取客户端（进程内复用，不再每次 new）。"""
-    cfg = get_provider(DEFAULT_PROVIDER)
+    cfg = get_provider()
     if not cfg.get("api_key"):
         raise RuntimeError(
-            f"默认 provider {DEFAULT_PROVIDER} 的 api_key 未配置，请检查 .env"
+            f"默认提供商「{cfg.get('name') or '（未配置）'}」还没有 api_key，"
+            "请在 设置 → 模型与密钥 里添加"
         )
     return get_llm_client(cfg["api_key"], cfg["base_url"])
 
@@ -336,7 +337,7 @@ def run_agent_stream(
         runtime.set_project_root(project_root)
 
     # 动态选择 client 和 model
-    default_cfg = get_provider(DEFAULT_PROVIDER)
+    default_cfg = get_provider(get_default_provider_id())
     if user_api_key:
         actual_client = get_llm_client(
             user_api_key, user_base_url or default_cfg["base_url"]

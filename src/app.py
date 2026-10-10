@@ -11,7 +11,12 @@ import db
 import paths
 import sandbox
 from agent import run_agent_stream
-from config_providers import DEFAULT_PROVIDER, RAG_PROVIDER, get_provider, get_provider_list
+from config_providers import (
+    get_default_provider_id,
+    get_provider,
+    get_provider_list,
+    get_rag_provider_id,
+)
 from paths import ICON_PATH, STATIC_DIR, TEMPLATES_DIR, is_path_permitted
 
 logger = logging.getLogger(__name__)
@@ -859,61 +864,118 @@ def _valid_base_url(url: str) -> bool:
     return url.startswith("http://") or url.startswith("https://")
 
 
-@app.route("/api/settings/keys", methods=["POST"])
-def save_provider_key():
-    """保存某个 provider 的 api_key / base_url。
+@app.route("/api/providers", methods=["POST"])
+def save_provider():
+    """新增或修改一个提供商。
 
-    **密钥只进不出**：这里收下后写进 ``data/providers.json``（权限 600），
-    之后任何接口都只返回掩码（``sk-…abcd``），绝不回传完整密钥。
+    **密钥只进不出**：收下后写进 ``data/providers.json``（权限 600），
+    此后任何接口都只返回掩码。修改时 ``api_key`` 传空 = 保持原值
+    （界面上永远不回显密钥，所以「留空」必须是「不改」而不是「清空」）。
     """
-    from config_providers import (
-        PROVIDERS,
-        clear_provider_credentials,
-        set_provider_credentials,
-    )
+    from config_providers import add_provider, provider_exists, update_provider
 
     data = request.get_json(silent=True) or {}
-    pid = (data.get("provider_id") or "").strip()
-    if pid not in PROVIDERS:
-        return jsonify({"ok": False, "error": f"未知的 provider：{pid}"}), 400
+    pid = (data.get("id") or "").strip()
 
-    api_key = data.get("api_key")
-    base_url = data.get("base_url")
+    base_url = (data.get("base_url") or "").strip()
+    if base_url and not _valid_base_url(base_url):
+        return jsonify({"ok": False, "error": "Base URL 必须以 http:// 或 https:// 开头"}), 400
 
-    if isinstance(api_key, str):
-        api_key = api_key.strip()
+    # upsert：id 已存在 → 更新；不存在（或没给）→ 新增。
+    # 不能简单地「有 id 就更新」—— 那样就没法用一个自己指定的 id 新增了。
+    if pid and provider_exists(pid):
+        _, err = update_provider(pid, data)
     else:
-        api_key = None
-
-    if isinstance(base_url, str):
-        base_url = base_url.strip()
-        if base_url and not _valid_base_url(base_url):
-            return jsonify({"ok": False, "error": "Base URL 必须以 http:// 或 https:// 开头"}), 400
-    else:
-        base_url = None
-
-    if api_key == "" and base_url in (None, ""):
-        clear_provider_credentials(pid)
-    else:
-        set_provider_credentials(pid, api_key, base_url)
+        _, err = add_provider(data)
+    if err:
+        return jsonify({"ok": False, "error": err}), 400
 
     # 日志里绝不出现密钥本身
-    logger.info("更新 provider 配置：%s（key=%s）", pid, "已设置" if api_key else "未改动")
-    return jsonify({"ok": True, "providers": get_provider_list()})
+    logger.info("保存提供商：%s（key=%s）", pid or data.get("name"),
+                "已更新" if data.get("api_key") else "未改动")
+    return jsonify({
+        "ok": True,
+        "providers": get_provider_list(),
+        "default": get_default_provider_id(),
+        "rag_provider": get_rag_provider_id(),
+    })
 
 
-@app.route("/api/settings/keys/<provider_id>", methods=["DELETE"])
-def delete_provider_key(provider_id):
-    """清除界面里保存的密钥（.env 里的仍会生效）。"""
-    from config_providers import PROVIDERS, clear_provider_credentials
+@app.route("/api/providers/<provider_id>", methods=["DELETE"])
+def delete_provider_cfg(provider_id):
+    """删除一个提供商（连带兜底改掉指向它的 default / rag 设置）。"""
+    from config_providers import delete_provider
 
-    if provider_id not in PROVIDERS:
-        return jsonify({"ok": False, "error": f"未知的 provider：{provider_id}"}), 400
-    clear_provider_credentials(provider_id)
-    return jsonify({"ok": True, "providers": get_provider_list()})
+    if not delete_provider(provider_id):
+        return jsonify({"ok": False, "error": f"没有这个提供商：{provider_id}"}), 404
+    logger.info("已删除提供商：%s", provider_id)
+    return jsonify({
+        "ok": True,
+        "providers": get_provider_list(),
+        "default": get_default_provider_id(),
+        "rag_provider": get_rag_provider_id(),
+    })
 
 
-# ============ 会话权限等级 ============
+@app.route("/api/providers/default", methods=["POST"])
+def set_default_provider_api():
+    """设置默认提供商（新会话默认用它）。"""
+    from config_providers import set_default_provider
+
+    pid = ((request.get_json(silent=True) or {}).get("id") or "").strip()
+    if not set_default_provider(pid):
+        return jsonify({"ok": False, "error": f"没有这个提供商：{pid}"}), 404
+    return jsonify({"ok": True, "default": get_default_provider_id()})
+
+
+@app.route("/api/providers/rag", methods=["POST"])
+def set_rag_provider_api():
+    """设置知识库（向量检索）用哪家的嵌入能力。空串 = 不指定。"""
+    from config_providers import set_rag_provider
+
+    pid = ((request.get_json(silent=True) or {}).get("id") or "").strip()
+    if not set_rag_provider(pid):
+        return jsonify({"ok": False, "error": f"没有这个提供商：{pid}"}), 404
+    return jsonify({"ok": True, "rag_provider": get_rag_provider_id()})
+
+
+@app.route("/api/providers/test", methods=["POST"])
+def test_provider():
+    """真发一次最小请求，确认 key / url / 模型名能通。
+
+    **为什么不只是校验格式**：用户填错最典型的是「URL 少了个 /v1」或
+    「模型名不存在」，这两种只有真调一次才知道。所以这里发一个 1 token 的请求。
+    """
+    from config_providers import get_provider
+    from utils import get_llm_client
+
+    data = request.get_json(silent=True) or {}
+    pid = (data.get("id") or "").strip()
+    cfg = get_provider(pid) if pid else {}
+    api_key = (data.get("api_key") or "").strip() or cfg.get("api_key") or ""
+    base_url = (data.get("base_url") or "").strip() or cfg.get("base_url") or ""
+    model = (data.get("model") or "").strip() or cfg.get("default_model") or ""
+
+    if not api_key:
+        return jsonify({"ok": False, "error": "还没有填 API Key"}), 400
+    if not base_url:
+        return jsonify({"ok": False, "error": "还没有填 Base URL"}), 400
+    if not model:
+        return jsonify({"ok": False, "error": "还没有填模型名称"}), 400
+
+    try:
+        client = get_llm_client(api_key, base_url)
+        client.chat.completions.create(
+            model=model, messages=[{"role": "user", "content": "hi"}],
+            max_tokens=1, timeout=20,
+        )
+    except Exception as e:                                  # noqa: BLE001
+        # 各家 SDK 的异常类型不一样，统一转成可读文案；绝不回显密钥
+        return jsonify({"ok": False, "error": f"连接失败：{type(e).__name__}: {e}"}), 200
+    return jsonify({"ok": True, "message": f"连接成功（{model}）"})
+
+
+# 权限等级的展示名（服务端权威，前端只是显示）
 PERMISSION_LABELS = {1: "只读", 2: "确认", 3: "完全"}
 
 
@@ -1087,11 +1149,15 @@ def history(session_id):
 # ============ Agent 执行 ============
 @app.route("/api/providers", methods=["GET"])
 def api_providers():
-    """返回可选的大模型提供商列表（不含 api_key）"""
+    """返回用户配置的大模型提供商列表。
+
+    **不含 api_key** —— 只回 ``has_key`` 与掩码 ``sk-…abcd``。这是硬约束：
+    浏览器拿得到完整密钥就等于泄漏。
+    """
     return jsonify({
         "providers": get_provider_list(),
-        "default": DEFAULT_PROVIDER,
-        "rag_provider": RAG_PROVIDER,
+        "default": get_default_provider_id(),
+        "rag_provider": get_rag_provider_id(),
     })
 
 
@@ -1677,7 +1743,7 @@ def run_multi():
                 _rt_multi.clear_pending_state(session_id)
 
             # 批次 6：三角色各自可以独立选 provider，默认继承 executor 的
-            executor_provider_id = data.get("provider_id") or DEFAULT_PROVIDER
+            executor_provider_id = data.get("provider_id") or get_default_provider_id()
             planner_provider_id = data.get("planner_provider_id") or executor_provider_id
             reviewer_provider_id = data.get("reviewer_provider_id") or executor_provider_id
 
