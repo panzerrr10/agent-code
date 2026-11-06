@@ -37,3 +37,11 @@ chroma_db/
 resume_build/
 潘宗_简历*
 简历-项目经历-agent-code.md
+
+# ===== 个人求职材料（不进项目仓库）=====
+# 简历、面试准备、投递记录属于个人材料，不该混进项目历史
+docs/简历-*.md
+docs/面试-*.md
+docs/面试准备-*.md
+docs/备忘录.txt
+docs/resume_build/
