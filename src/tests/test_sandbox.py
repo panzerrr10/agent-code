@@ -99,8 +99,10 @@ def test_docker_cmd_mounts_project_root_and_hardens(tmp_path):
     # 挂载与工作目录
     assert f"{tmp_path}:/workspace" in joined
     assert cmd[cmd.index("-w") + 1] == "/workspace"
-    # 网络由配置决定（默认 none）
-    assert cmd[cmd.index("--network") + 1] == sandbox.NETWORK
+    # 网络由策略决定（不再硬编码 none）。
+    # 注意：allow_package_install 默认开，所以默认是 bridge ——
+    # 具体映射由 test_policy.py 覆盖，这里只断言「用的确实是那个判定」。
+    assert cmd[cmd.index("--network") + 1] == sandbox.network_mode()
 
 
 def test_run_argv_quotes_every_argument(monkeypatch, tmp_path):
@@ -184,8 +186,16 @@ def test_real_sandbox_sees_and_writes_the_same_files(tmp_path):
 
 
 @pytest.mark.skipif(not _real_docker_ready(), reason="需要 Docker 与沙箱镜像")
-def test_real_sandbox_isolates_network(tmp_path):
-    """默认 --network=none：容器内不应能访问外网。"""
+def test_real_sandbox_isolates_network(tmp_path, monkeypatch):
+    """显式配成 none 时，容器内不应能访问外网。
+
+    （allow_package_install 默认开后，沙箱默认是 bridge —— 所以这里必须
+    **显式**把网络配成 none，测的才是「隔离机制本身有效」，而不是默认值。）
+    """
+    monkeypatch.setenv("AGENT_SANDBOX_NETWORK", "none")
+    import policy
+
+    policy.reset_cache()
     res = sandbox.run_script(
         "python3 -c \"import urllib.request;urllib.request.urlopen('http://example.com',timeout=4)\"",
         60,

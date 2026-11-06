@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 import os
@@ -51,6 +52,16 @@ def isolate_env() -> str:
     if src not in sys.path:
         sys.path.insert(0, src)
     _EVAL_TMP = d
+
+    # **保证任何退出路径都会清掉它。**
+    #
+    # 原来只靠 ``eval/run.py`` 末尾手动调一次 ``cleanup_env()``，而且那行
+    # **不在 finally 里** —— 一按 Ctrl-C、一抛异常就直接泄漏。
+    # 实测后果：用户 home 下攒了 71 个 ``agentcode-eval-*``，
+    # 每个只剩一个 8KB 的 mcp.json（占了 568K 的目录项，也脏了 home）。
+    # atexit 覆盖正常退出、异常退出与 KeyboardInterrupt（它们都会走到解释器关闭）。
+    # 覆盖不到的是 SIGKILL —— 那种情况无解。
+    atexit.register(cleanup_env)
     return d
 
 

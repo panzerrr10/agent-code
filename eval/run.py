@@ -174,9 +174,13 @@ def main():
             with open(args.baseline, encoding="utf-8") as f:
                 _compare(json.load(f), payload)
 
-    harness.cleanup_env()
     return 0 if s["passed"] == s["tasks"] else 1
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # 双保险：atexit 兜异常退出 / Ctrl-C（见 harness.isolate_env），
+    # 这里的 finally 兜「main() 自己抛异常」这条最常走的路。
+    try:
+        sys.exit(main())
+    finally:
+        harness.cleanup_env()

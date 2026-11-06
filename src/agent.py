@@ -4,6 +4,7 @@ import time
 
 import compaction
 import project_context
+import repo_context
 from config import (
     CONTEXT_BUDGET_TOKENS,
     CONTEXT_KEEP_RECENT_TOOL_RESULTS,
@@ -16,7 +17,7 @@ from config_providers import (
     get_provider_id_by_base_url,
 )
 from tools import execute_tool, get_tools_schema, is_privileged_tool
-from utils import call_llm_with_retry, get_llm_client
+from utils import cache_hit_rate, call_llm_with_retry, extract_cache_stats, get_llm_client
 
 # 流式文本的发送节流间隔（秒）。
 # 后端本来就是逐 chunk 收的（stream=True），但**收到的一直攒到最后才发一次** ——
@@ -27,7 +28,14 @@ STREAM_FLUSH_SEC = 0.05
 
 
 def _get_default_client():
-    """按默认 provider 取客户端（进程内复用，不再每次 new）。"""
+    """按默认 provider 取客户端（进程内复用，不再每次 new）。
+
+    注意：这里刻意读**本模块**的 ``get_provider`` / ``get_llm_client`` 名字，
+    而不是转发到 ``utils.get_default_client()`` —— 测试是通过
+    ``monkeypatch.setattr(agent, "get_provider", ...)`` 打桩的，
+    转发会把打桩点绕过去（真踩过）。planner / reviewer / mini_agent
+    走 ``utils.get_default_client()``，那边是另一套桩点。
+    """
     cfg = get_provider()
     if not cfg.get("api_key"):
         raise RuntimeError(
@@ -373,6 +381,10 @@ def run_agent_stream(
             _root = None
     _project_ctx = project_context.load(_root)
     _project_ctx_msg = project_context.build_system_message(_root)
+    # 代码库索引：按**当前任务**做 focus 加权 —— 同一个仓库，改登录和改导出
+    # 时该排在索引顶部的文件不一样。每次运行重建（实测 65 文件约 150ms），
+    # 相对一次 LLM 调用可忽略，因此不做缓存、永不给模型过期信息。
+    _repo_ctx_msg, _repo_ctx = repo_context.build_system_message(_root, focus=user_task)
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT + memory_context + plan_context}
@@ -398,6 +410,18 @@ def run_agent_stream(
             "truncated": _project_ctx["truncated"],
         }
 
+    if _repo_ctx_msg:
+        messages.append(_repo_ctx_msg)
+        yield {
+            "type": "repo_map",
+            "files": _repo_ctx["files"],
+            "indexed": _repo_ctx["indexed"],
+            "symbols": _repo_ctx["symbols"],
+            "chars": len(_repo_ctx["text"]),
+            "languages": _repo_ctx["languages"],
+            "truncated": _repo_ctx["truncated"],
+        }
+
     # 【消费端】如果 _resume=True 且有 pending state，用保存的 messages 覆盖
     _resumed_from_pending = False
     _pending = None
@@ -415,6 +439,13 @@ def run_agent_stream(
                 for m in messages
             ):
                 messages.insert(1, _project_ctx_msg)
+            # 代码库索引同理：旧 pending 里可能没有这条，补上（续跑用的任务文本
+            # 此时还是「新的 user_task」，focus 会偏一点，但索引本身仍然有效）
+            if _repo_ctx_msg and not any(
+                isinstance(m, dict) and str(m.get("content", "")).startswith("# 代码库索引")
+                for m in messages
+            ):
+                messages.insert(1, _repo_ctx_msg)
             # 兼容旧 pending_state：
             # 如果 assistant 消息带 reasoning_content 但是空/不完整，
             # DeepSeek 会 400。干脆清掉所有空的 reasoning_content 字段，让 API 不校验。
@@ -533,7 +564,12 @@ def run_agent_stream(
     total_prompt_tokens = 0
     total_completion_tokens = 0
     total_tokens = 0
+    # prompt 缓存命中（跨步累加）。两个都为 0 = 该厂商没上报，不是「命中 0%」。
+    total_cache_hit_tokens = 0
+    total_cache_miss_tokens = 0
     failure_tracker = {}
+    # 「上下文快满了」只提醒一次，别每一步都刷屏
+    _budget_warned = False
 
     def _persist_pending(
         _step, _current_ids=None, _processed_ids=None, _pending_tool=None, _confirm_token=None
@@ -621,13 +657,57 @@ def run_agent_stream(
                 yield {"type": "context_stats", **_cstats}
             if not _cstats["pairing_ok"]:
                 # 压缩破坏了 tool_call 配对 —— 发出去必然 400。
-                # 宁可停下来说清楚，也不要甩一个费解的 API 错误给用户。
+                # 先尝试自愈（删孤儿 tool 消息 / 摘掉没有回复的 tool_calls），
+                # 能修好就继续跑；修不好才中止 —— 原来是一律中止整轮任务，
+                # 已跑完的几十步全废。
+                _repaired = compaction.repair_pairing(messages)
+                _still_bad = compaction.check_pairing(messages)
+                if _still_bad:
+                    _persist_pending(step)
+                    yield {
+                        "type": "error",
+                        "content": (
+                            "❌ 内部错误：上下文压缩破坏了工具调用配对，已中止本次运行。"
+                            "进度已保存，可以点「继续」从断点恢复。"
+                        ),
+                    }
+                    yield {"type": "done"}
+                    return
+                print(f"[COMPACT] 配对自愈成功，修复 {_repaired} 处")
+            if _cstats.get("over_budget") and not _budget_warned:
+                # 压了但没压下去。**不中止** —— CONTEXT_BUDGET_TOKENS 是软目标
+                # （约模型窗口的一半），不是硬限制；拿软目标去掐任务，会把
+                # 本来能跑完的长任务误杀。这里做两件事：
+                #   1. 明确告诉用户「上下文要爆了」
+                #   2. 让他在 400 之前有机会收手
+                # 真超了模型窗口的话，LLM 会报 400，而那条路径现在有
+                # 「上下文超限」的友好文案 + 断点已保存，不再是死路。
+                _budget_warned = True
                 yield {
-                    "type": "error",
-                    "content": "❌ 内部错误：上下文压缩破坏了工具调用配对，已中止本次运行。",
+                    "type": "text",
+                    "content": (
+                        f"\n\n⚠️ 上下文已接近模型窗口上限"
+                        f"（压缩后约 {_cstats['after_tokens']} tokens，"
+                        f"预算 {_cstats['budget']}）。"
+                        "继续下去可能请求失败；建议把超长内容存成文件后用 "
+                        "read_file 分段查看，或另开一个会话。\n\n"
+                    ),
                 }
-                yield {"type": "done"}
-                return
+
+            # 【新增】把「这一步开始前」的状态存成断点。
+            #
+            # 原来 pending 只在三个取消检查点 + 确认挂起时写。后果：
+            #   * 一次 429 / 网络抖动（重试 3 次仍失败）→ 前面十几步全丢
+            #   * 用户关标签页 / 刷新 → WSGI 会 close 生成器，抛的是 GeneratorExit
+            #     （BaseException），下面那些 `except Exception` **一个都抓不到**
+            #     → 既不落 pending 也不落库，刷新后连「继续」都没得点
+            # 现在每一步都写一次断点，最坏只丢「当前这一步」。
+            #
+            # 位置很关键：必须在 compact 之后（存进去的应当是压缩后的版本，
+            # 否则续跑时会拿一份超预算的历史），且在 LLM 调用之前
+            # （此处 messages 停在两步之间的安全边界，没有悬空 tool_call）。
+            _persist_pending(step)
+
             # DeepSeek 推理模型：调用 LLM 前保证发给 API 的 messages 的
             # reasoning_content 字段内部一致，否则 400
             _ensure_reasoning_consistency(messages)
@@ -744,9 +824,26 @@ def run_agent_stream(
             ):
                 friendly = "❌ 网络连接失败，请检查网络"
             elif "400" in err_msg:
-                friendly = f"❌ 请求参数错误：{err_msg[:150]}"
+                if "context" in err_lower or "maximum context" in err_lower or "too long" in err_lower:
+                    friendly = (
+                        "❌ 上下文超出模型窗口。请开一个新会话，"
+                        "或把超长内容存成文件后用 read_file 分段查看。"
+                    )
+                else:
+                    friendly = f"❌ 请求参数错误：{err_msg[:150]}"
             else:
                 friendly = f"❌ 调用失败：{err_msg[:200]}"
+
+            # 【修复】报错也要存断点。
+            # 原来这里只 yield error 然后 return —— 第 20 步遇到一次 429 / 网络抖动
+            # （重试 3 次仍失败）就意味着**前 19 步的工具结果全丢**，用户只能重说一遍。
+            # 现在把当前状态存成 pending，用户点「继续」就能从断点接着跑。
+            # messages 此刻停在「两步之间」的安全边界（assistant 消息还没入列），
+            # 直接存即可。
+            try:
+                _persist_pending(step)
+            except Exception:                                # noqa: BLE001
+                print("[ERROR] 保存断点失败（不影响报错本身）")
 
             yield {"type": "error", "content": friendly}
             return
@@ -755,6 +852,18 @@ def run_agent_stream(
             total_prompt_tokens += usage.prompt_tokens or 0
             total_completion_tokens += usage.completion_tokens or 0
             total_tokens += usage.total_tokens or 0
+            # prompt 缓存命中（各家字段名不同，见 utils.extract_cache_stats）。
+            # 采集它是为了能**看见**「固定前缀有没有被复用」——
+            # 多步任务里系统提示 + 工具 schema + 代码库索引每步都重发，
+            # 命中率决定了这部分到底是白烧还是几乎免费。
+            _cs = extract_cache_stats(usage)
+            total_cache_hit_tokens += _cs["cache_hit_tokens"]
+            total_cache_miss_tokens += _cs["cache_miss_tokens"]
+            _p = usage.prompt_tokens or 0
+            print(
+                f"[CACHE] step={step} prompt={_p} "
+                f"hit={_cs['cache_hit_tokens']} miss={_cs['cache_miss_tokens']}"
+            )
 
         # 构造一个「模拟的 assistant_msg」（和你原来的数据结构一致）
         class _Msg:
@@ -879,28 +988,45 @@ def run_agent_stream(
 
                 # 失败跟踪：会改磁盘 / 会执行的工具连续失败 3 次就停下，
                 # 避免它在同一个坑里反复重试（原来只对 delete_file 生效）。
-                if is_privileged_tool(func_name) and isinstance(result, str) and result.startswith("❌"):
+                #
+                # 【修复】原来这个计数器**成功时不清零** —— 复位分支要求
+                # `result.startswith("❌")` 且只对非特权工具生效，于是特权工具
+                # 成功时计数原地不动。结果是「失败→成功→失败→成功→失败」也会
+                # 触发中止，提示语却写着「已**连续**失败 3 次」，语义完全不符。
+                _failed = isinstance(result, str) and result.startswith("❌")
+                if _failed:
                     failure_tracker[func_name] = failure_tracker.get(func_name, 0) + 1
+                else:
+                    failure_tracker[func_name] = 0
+
+                # 【修复】失败警告原来被当成一条独立的 `role: user` 消息插在
+                # assistant(tool_calls) 与它的 tool 回复**之间**，造成
+                # `assistant.tool_calls → user → tool` 这种非法交错：
+                #   1. 违反 OpenAI 兼容契约（tool 必须紧跟它的 tool_calls）
+                #   2. 会让压缩的配对自检失败，而自检失败会**中止整轮任务**
+                # 现在改成把警告拼进 tool 结果本身 —— 结构永远合法，模型照样看得到。
+                _tool_content = result
+                if _failed and is_privileged_tool(func_name):
                     fail_count = failure_tracker[func_name]
                     if fail_count >= 3:
                         yield {
                             "type": "text",
-                            "content": f"\n\n⚠️ 工具 `{func_name}` 已连续失败 3 次，停止执行。请检查任务描述或手动处理。",
+                            "content": (
+                                f"\n\n⚠️ 工具 `{func_name}` 已连续失败 3 次，"
+                                "停止执行。请检查任务描述或手动处理。"
+                            ),
                         }
                         yield {"type": "done"}
                         return
                     if fail_count >= 2:
-                        messages.append(
-                            {
-                                "role": "user",
-                                "content": f"⚠️ 系统提示：`{func_name}` 已连续失败 {fail_count} 次。请分析失败原因，换个方式重试，或告诉用户无法完成。",
-                            }
+                        _tool_content = (
+                            f"{result}\n\n⚠️ 系统提示：`{func_name}` 已连续失败 "
+                            f"{fail_count} 次。请分析失败原因，换个方式重试，"
+                            "或告诉用户无法完成。"
                         )
-                elif isinstance(result, str) and result.startswith("❌"):
-                    failure_tracker[func_name] = 0
 
                 messages.append(
-                    {"role": "tool", "tool_call_id": tc.id, "content": result}
+                    {"role": "tool", "tool_call_id": tc.id, "content": _tool_content}
                 )
 
             continue
@@ -917,6 +1043,9 @@ def run_agent_stream(
             "prompt_tokens": total_prompt_tokens,
             "completion_tokens": total_completion_tokens,
             "total_tokens": total_tokens,
+            "cache_hit_tokens": total_cache_hit_tokens,
+            "cache_miss_tokens": total_cache_miss_tokens,
+            "cache_hit_rate": cache_hit_rate(total_cache_hit_tokens, total_prompt_tokens),
             "steps": step + 1,
         }
         import runtime as _rt_clear
@@ -934,6 +1063,9 @@ def run_agent_stream(
         "prompt_tokens": total_prompt_tokens,
         "completion_tokens": total_completion_tokens,
         "total_tokens": total_tokens,
+        "cache_hit_tokens": total_cache_hit_tokens,
+        "cache_miss_tokens": total_cache_miss_tokens,
+        "cache_hit_rate": cache_hit_rate(total_cache_hit_tokens, total_prompt_tokens),
         "steps": max_steps,
     }
     yield {"type": "done"}

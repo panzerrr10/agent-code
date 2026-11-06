@@ -103,10 +103,83 @@ def get_allowed_dirs():
     return [get_user_home()]
 
 
+# 文件名级机密黑名单（**只作用于 Agent 工具**，见 is_allowed_path 的说明）。
+#
+# 为什么需要它：get_forbidden_dirs() 是「目录级」黑名单，而 .env / providers.json /
+# auth_token 这类文件散落在用户目录各处，目录级规则拦不住。它们一旦被 read_file
+# 读进上下文，下一轮就会随请求发给第三方 LLM API —— 沙箱的 --network=none
+# **挡不住这条外发通道**。实测过：Agent 的 read_file 原本能读出 data/providers.json
+# 里的全部明文 API Key，与「密钥只进不出」的设计承诺直接矛盾。
+SECRET_BASENAMES = {
+    # 应用自身的机密
+    "providers.json",
+    "auth_token",
+    "policy.json",
+    # 环境变量文件（几乎必然含密钥）
+    ".env",
+    ".env.local",
+    ".env.development",
+    ".env.production",
+    ".env.test",
+    # 机器 / 三方凭据
+    "id_rsa",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    ".netrc",
+    ".npmrc",
+    ".pypirc",
+    ".git-credentials",
+    "credentials",
+}
+
+
+def get_secret_files() -> list[str]:
+    """明确列出的机密文件绝对路径（补充 SECRET_BASENAMES 的按名匹配）。"""
+    base = get_base_dir()
+    return [
+        os.path.join(DATA_DIR, "providers.json"),
+        os.path.join(DATA_DIR, "auth_token"),
+        os.path.join(DATA_DIR, "policy.json"),
+        os.path.join(base, ".env"),
+        os.path.join(base, ".env.local"),
+    ]
+
+
+def is_secret_path(path: str) -> bool:
+    """路径是否指向机密文件（按明确路径 + 文件名双重判断）。
+
+    注意：**只拦 Agent 工具**。Web 文件面板走 ``is_path_permitted``，
+    用户本人在自己的编辑器里读写不受限制（按用户要求）。
+    """
+    try:
+        real = os.path.realpath(path)
+    except Exception:
+        return False
+
+    for secret in get_secret_files():
+        try:
+            if real == os.path.realpath(secret):
+                return True
+        except Exception:                                    # noqa: BLE001
+            continue
+
+    name = os.path.basename(real)
+    if name in SECRET_BASENAMES:
+        return True
+    # .env.xxx 之类的前缀形式；.env.example 是模板（不含真密钥），明确放行
+    if name.startswith(".env.") and name != ".env.example":
+        return True
+    return False
+
+
 def is_allowed_path(path: str) -> bool:
     try:
         real = os.path.realpath(path)
     except Exception:
+        return False
+    # 机密文件优先拒绝（即使它就在 home 白名单里）
+    if is_secret_path(real):
         return False
     for forbidden in get_forbidden_dirs():
         try:

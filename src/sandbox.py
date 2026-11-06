@@ -38,6 +38,10 @@ import uuid
 logger = logging.getLogger(__name__)
 
 IMAGE = os.getenv("AGENT_SANDBOX_IMAGE", "agent-sandbox")
+# 网络模式**不再在 import 时定死**：它要跟着 policy 走 —— 用户打开「允许联网 /
+# 允许安装依赖」之后，容器必须同时拿到网络，否则命令放行了但容器里还是出不去，
+# 用户会看到「明明开了还是失败」这种最费解的故障。
+# 这里保留同名常量仅作**默认值**，真正生效的取 network_mode()。
 NETWORK = os.getenv("AGENT_SANDBOX_NETWORK", "none")
 MEMORY = os.getenv("AGENT_SANDBOX_MEMORY", "512m")
 CPUS = os.getenv("AGENT_SANDBOX_CPUS", "1")
@@ -47,6 +51,16 @@ ALLOW_HOST_EXEC = os.getenv("AGENT_ALLOW_HOST_EXEC") == "1"
 TESTS_IN_SANDBOX = os.getenv("AGENT_TESTS_IN_SANDBOX") == "1"
 
 _MOUNT_TARGET = "/workspace"
+
+
+def network_mode() -> str:
+    """本次容器该用哪个网络模式（每次调用都重新判定，设置改了立刻生效）。"""
+    try:
+        import policy
+
+        return policy.sandbox_network()
+    except Exception:                                        # noqa: BLE001
+        return NETWORK
 
 _docker_ok: bool | None = None
 _image_ok: bool | None = None
@@ -115,7 +129,7 @@ def _build_docker_cmd(
         cmd += ["--name", name]
     cmd += [
         "--network",
-        NETWORK,
+        network_mode(),
         "--memory",
         MEMORY,
         "--cpus",
@@ -145,8 +159,59 @@ def _build_docker_cmd(
             "-e",
             "GIT_CONFIG_GLOBAL=/tmp/.gitconfig",
         ]
+    cmd += _build_cache_mounts()
     cmd += [IMAGE, "sh", "-c", script]
     return cmd
+
+
+# 宿主机缓存目录 -> 容器内 HOME(/tmp) 下的对应位置。
+#
+# 为什么需要：容器每次都是 `docker run --rm` 起的**全新**环境，`HOME=/tmp`。
+# 不挂缓存的话，每个 Java 项目都要把 Maven 依赖（常常几百 MB）重新下一遍，
+# pip 同理。挂上之后就与宿主共用缓存 —— 重复构建快得多，也省流量。
+#
+# 只挂**已存在**的目录（`:rw`，因为容器要往里写）。不存在就不挂，行为与以前一致。
+# 缓存的家目录。默认是用户 home，但允许用 AGENT_CACHE_HOME 改掉 ——
+# 测试必须隔离它，否则跑一次用例就会在真实 home 里建出 ~/.m2
+# （与本项目已经隔离 DB / 回收站 / MCP 配置 / 策略文件的理由一样）。
+_CACHE_HOME = os.environ.get("AGENT_CACHE_HOME") or os.path.expanduser("~")
+
+_CACHE_MOUNTS = (
+    (".m2", "/tmp/.m2"),                          # Maven 本地仓库
+    (os.path.join(".cache", "pip"), "/tmp/.cache/pip"),   # pip wheel 缓存
+    (os.path.join(".cache", "uv"), "/tmp/.cache/uv"),     # uv 缓存
+)
+
+
+def _build_cache_mounts() -> list[str]:
+    """给容器挂上宿主机的包管理器缓存。
+
+    目录不存在就**建出来**（`~/.m2` 本来就是 Maven 第一次运行会自己建的）。
+    不建的话这些缓存挂不进去，而容器每次都是 `--rm` 全新环境 ——
+    每个 Java 项目都要把 Maven 依赖重下一遍，慢到必然撞超时。
+    建出来的缓存同时被宿主的 mvn / pip 复用，重复构建快得多。
+
+    挂载失败（权限等）不影响执行：调用方把它当尽力而为。
+    """
+    out: list[str] = []
+    home = _CACHE_HOME
+    for rel, target in _CACHE_MOUNTS:
+        host = os.path.join(home, rel)
+        if not os.path.isdir(host):
+            try:
+                os.makedirs(host, exist_ok=True)
+            except OSError:
+                continue
+        # 必须是**我们写得进去**的目录。
+        # 否则容器里以当前 uid 运行却写不进去，Maven 会抛
+        # LocalRepositoryNotAccessibleException 这种看不懂的错。
+        # 真实踩过：手动 `docker run -v ~/.m2:...` 时若源路径不存在，
+        # Docker 守护进程会**以 root 建出**该目录，之后我们自己就用不了了。
+        if not os.access(host, os.W_OK | os.X_OK):
+            logger.warning("缓存目录不可写，跳过挂载（不影响执行，只是会慢）：%s", host)
+            continue
+        out += ["-v", f"{host}:{target}"]
+    return out
 
 
 def _kill_container(name: str) -> None:
@@ -254,13 +319,27 @@ def run_script(
             f"（超时前捕获到的输出如下，可能不完整）\n{stdout_text[-1000:]}",
         )
 
+    return SandboxResult(True, format_exec_output(stdout_text, stderr_text, rc))
+
+
+def format_exec_output(stdout_text: str, stderr_text: str, rc: int) -> str:
+    """把容器输出拼成给模型看的结果。
+
+    单独抽出来是为了**可测**：横幅里的网络模式必须报「实际用的那个」，
+    而不是 import 时定死的 ``NETWORK`` 常量。
+
+    实测踩过这个坑：``allow_package_install`` 默认开后容器走的是 ``bridge``，
+    但横幅一直写 ``network=none`` —— 用户会以为「我开了联网怎么还是 none」，
+    模型也会据此做出错误的环境判断。
+    """
     out = ""
     if stdout_text:
         out += f"【stdout】\n{stdout_text}"
     if stderr_text:
         out += f"\n【stderr】\n{stderr_text}"
-    out += f"\n\n【退出码】{rc}\n【沙箱】docker:{IMAGE}（network={NETWORK}）"
-    return SandboxResult(True, out)
+    out += f"\n\n【退出码】{rc}\n【沙箱】docker:{IMAGE}（network={network_mode()}）"
+    return out
+
 
 
 def run_argv(

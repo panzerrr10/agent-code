@@ -1,4 +1,5 @@
 import os
+import re
 import shlex
 import subprocess
 
@@ -121,7 +122,18 @@ def read_file_range(path: str, start: int = 1, end: int = 100) -> str:
 
 
 def search_files(keyword: str, path: str = ".", max_results: int = 50) -> str:
-    """在目录下搜索包含关键词的文件"""
+    """在目录下搜索包含关键词的文件（多语言）。
+
+    【本次修复】原来这里用的是**扩展名白名单**，而且白名单漏掉了整个现代技术栈：
+    没有 .ts / .tsx / .vue / .go / .rs / .java / .kt / .c / .cpp / .cs / .php /.rb .sql …。
+    后果非常隐蔽 —— 在 TypeScript / Go / Java 项目里搜索会**静默返回「未找到」**，
+    模型据此判断「项目里没有这个东西」，然后基于错误前提继续干活。
+
+    现在改成**黑名单策略**：只看「这文件是不是文本」（按扩展名排除已知二进制 +
+    读前 8KB 判有无空字节），是文本就搜。语言覆盖问题从此不会再出现。
+    """
+    import repomap
+
     path = _normalize_path(path)
     if not is_allowed_path(path):
         return f"❌ 拒绝访问：{path} 不在白名单内"
@@ -132,6 +144,7 @@ def search_files(keyword: str, path: str = ".", max_results: int = 50) -> str:
             return f"❌ 不是目录：{path}"
 
         results = []
+        scanned = 0
         for root, dirs, files in os.walk(abs_path):
             # 跳过常见无关目录
             dirs[:] = [
@@ -145,27 +158,24 @@ def search_files(keyword: str, path: str = ".", max_results: int = 50) -> str:
                     ".venv",
                     "venv",
                     "chroma_db",
+                    "dist",
+                    "build",
+                    "target",
                 }
+                and not d.startswith(".")
             ]
 
-            for fname in files:
+            for fname in sorted(files):
                 fpath = os.path.join(root, fname)
-                # 只搜文本文件
-                if not fname.endswith(
-                    (
-                        ".py",
-                        ".txt",
-                        ".md",
-                        ".json",
-                        ".html",
-                        ".css",
-                        ".js",
-                        ".yaml",
-                        ".yml",
-                        ".toml",
-                    )
-                ):
+                if not repomap.is_probably_text(fpath):
                     continue
+                # 单文件保护：超大日志/数据文件跳过，别把搜索拖死
+                try:
+                    if os.path.getsize(fpath) > 2 * 1024 * 1024:
+                        continue
+                except OSError:
+                    continue
+                scanned += 1
                 try:
                     with open(fpath, encoding="utf-8", errors="ignore") as f:
                         for i, line in enumerate(f, 1):
@@ -182,8 +192,9 @@ def search_files(keyword: str, path: str = ".", max_results: int = 50) -> str:
                 break
 
         if not results:
-            return f"未找到包含 '{keyword}' 的内容"
-        return f"找到 {len(results)} 处匹配：\n" + "\n".join(results)
+            return f"未找到包含 '{keyword}' 的内容（已扫描 {scanned} 个文本文件）"
+        truncated = "（已达上限，结果是截断的，请缩小搜索范围）" if len(results) >= max_results else ""
+        return f"找到 {len(results)} 处匹配{truncated}：\n" + "\n".join(results)
     except Exception as e:
         return f"❌ 搜索失败：{e}"
 
@@ -484,6 +495,16 @@ def run_python(code: str, timeout: int = 30) -> str:
     if len(code) > 50_000:
         return "❌ 代码太长（超过 50000 字符）"
 
+    # run_python 原来**完全不过拦截层** —— 而它和 run_command 一样能读文件。
+    # 沙箱把项目根目录（默认就是 $HOME）挂成 /workspace，于是
+    # `open('/workspace/.ssh/id_ed25519').read()` 可以直接把私钥读进上下文。
+    # 这里过一遍 check_banned 的凭据/破坏性规则（源码里出现那些路径字面量就拦）。
+    # 说明：这只是**减速带**，不是边界 —— 拼接出的路径绕得过它。
+    # 真正的边界是「不要把 $HOME 当默认工作区」+ 沙箱不挂敏感目录。
+    banned = check_banned(code)
+    if banned:
+        return banned
+
     # 用 base64 编码后写进容器，避免 shell 转义问题
     import base64
 
@@ -568,46 +589,36 @@ def is_privileged_tool(name: str) -> bool:
     return tool_permission_kind(name) in ("mutate", "execute")
 
 
-# ===== 危险操作黑名单（所有等级一律生效，等级 3 也拦）=====
-# ⚠️ 这只是**减速带**，不是安全边界：关键词匹配永远能被绕过。
-#    真正拦住 Agent 的是沙箱（--network=none、--cap-drop=ALL、非 root、
-#    只挂载项目根目录）。这份清单挡住的是「明显不该做」的动作。
-#    按用户要求：**禁止一切外发**（联网、推送、安装、发信）。
+# ===== 危险操作拦截（三层，从硬到软）=====
+#
+#   1. ``BANNED_RULES``     无条件拦：破坏性 / 提权 / 系统控制 / 凭据读取。
+#                           任何权限等级、任何策略开关都绕不过去。
+#   2. ``GATED_RULES``      默认拦，``policy`` 里对应开关打开后放行
+#                           （联网 / 安装依赖 / 推送到远端）。
+#   3. 结构化检查           子串匹配天然漏掉的东西：``rm`` 的各种拼写、
+#                           ``find -delete`` / ``-exec``、机密文件读取。
+#
+# ⚠️ 前两层仍然只是**减速带**，不是安全边界：子串匹配永远能被绕过。
+#    真正拦住 Agent 的是沙箱（--cap-drop=ALL、非 root、只挂载项目根目录）
+#    加上「每次危险操作都要用户确认」。这份清单挡的是「明显不该做」的动作，
+#    以及把误操作变成「至少要按一次确认」。
+#
+# 关于第 2 层的由来：原先这里把**联网、安装、推送**也一律硬拦（「禁止一切外发」）。
+# 对个人自用是合理的默认，但作为程序员的日常工具，它直接让 Agent 残废 ——
+# 装不了依赖、拉不到代码、推不了分支。现在拆成显式开关，**默认仍然是全关**，
+# 行为不变；想要的人可以在 设置 → 执行策略 里打开。
+#
+# 注意：``npm run build`` / ``mvn`` / ``gradle`` / ``cargo build`` 这类**构建命令本身**
+# 不在拦截面里 —— 它们要不要联网由沙箱网络决定，而沙箱网络跟着 policy 走
+# （见 policy.sandbox_network()）。这样不会因为「构建工具顺带下载依赖」就误杀。
 BANNED_RULES = [
-    # --- 外发 / 联网 ---
-    ("curl ", "联网下载"),
-    ("wget ", "联网下载"),
-    ("nc ", "网络连接"),
-    ("ncat ", "网络连接"),
-    ("netcat", "网络连接"),
-    ("telnet", "远程登录"),
-    ("ssh ", "远程登录"),
-    ("scp ", "远程复制"),
-    ("sftp", "远程复制"),
-    ("rsync ", "远程同步"),
-    ("ftp ", "网络传输"),
-    ("git push", "推送到远端"),
-    ("git remote add", "添加远端"),
-    ("git remote set-url", "修改远端"),
-    ("git fetch", "访问远端"),
-    ("git pull", "访问远端"),
-    ("git clone", "访问远端"),
-    ("pip install", "联网安装（会执行 postinstall 脚本）"),
-    ("pip3 install", "联网安装"),
-    ("npm install", "联网安装（会执行 postinstall 脚本）"),
-    ("yarn add", "联网安装"),
-    ("apt install", "联网安装"),
-    ("apt-get install", "联网安装"),
-    ("snap install", "联网安装"),
-    ("sendmail", "发送邮件"),
-    # --- 递归强删（各种拼写）---
+    # --- 不可恢复的删除（其它拼写由 _check_destructive_rm 结构化兜住）---
     ("rm -rf", "递归强制删除"),
     ("rm -fr", "递归强制删除"),
     ("rm -r -f", "递归强制删除"),
     ("rm -f -r", "递归强制删除"),
     ("rm --recursive", "递归删除"),
     ("rm --force", "强制删除"),
-    ("find / -delete", "遍历删除"),
     ("shred ", "不可恢复擦除"),
     ("truncate -s 0", "清空文件"),
     ("mkfs", "格式化文件系统"),
@@ -639,31 +650,193 @@ BANNED_RULES = [
     ("crontab", "写定时任务"),
     (":(){:|:&};:", "fork 炸弹"),
     (":(){", "fork 炸弹"),
-    # --- 全局配置 / 凭据 ---
+    # --- 全局配置（凭据读取见下面的 CREDENTIAL_PATTERNS，用正则覆盖各种路径写法）---
     ("git config --global", "改全局 git 配置"),
-    ("~/.ssh", "读写 SSH 凭据"),
-    ("id_rsa", "SSH 私钥"),
     ("/etc/passwd", "系统账户文件"),
     ("/etc/shadow", "系统口令文件"),
 ]
 
+# 默认拦、开关打开后放行。第三项是 policy.FLAGS 里的键名。
+GATED_RULES = [
+    # --- 联网 ---
+    ("curl ", "联网下载", "allow_network"),
+    ("wget ", "联网下载", "allow_network"),
+    ("nc ", "网络连接", "allow_network"),
+    ("ncat ", "网络连接", "allow_network"),
+    ("netcat", "网络连接", "allow_network"),
+    ("telnet", "远程登录", "allow_network"),
+    ("ssh ", "远程登录", "allow_network"),
+    ("scp ", "远程复制", "allow_network"),
+    ("sftp", "远程复制", "allow_network"),
+    ("rsync ", "远程同步", "allow_network"),
+    ("ftp ", "网络传输", "allow_network"),
+    ("sendmail", "发送邮件", "allow_network"),
+    ("git fetch", "访问远端", "allow_network"),
+    ("git pull", "访问远端", "allow_network"),
+    ("git clone", "访问远端", "allow_network"),
+    ("git remote add", "添加远端", "allow_network"),
+    ("git remote set-url", "修改远端", "allow_network"),
+    # --- 推送到远端：单独一个开关，因为它会把本地代码发出去 ---
+    ("git push", "推送到远端", "allow_git_push"),
+    # --- 安装依赖（会执行安装脚本，不只是下载）---
+    ("pip install", "安装依赖（会执行包安装脚本）", "allow_package_install"),
+    ("pip3 install", "安装依赖（会执行包安装脚本）", "allow_package_install"),
+    ("uv pip install", "安装依赖（会执行包安装脚本）", "allow_package_install"),
+    ("uv add", "安装依赖（会执行包安装脚本）", "allow_package_install"),
+    ("npm install", "安装依赖（会执行包安装脚本）", "allow_package_install"),
+    ("npm i ", "安装依赖（会执行包安装脚本）", "allow_package_install"),
+    ("npm ci", "安装依赖（会执行包安装脚本）", "allow_package_install"),
+    ("yarn add", "安装依赖（会执行包安装脚本）", "allow_package_install"),
+    ("yarn install", "安装依赖（会执行包安装脚本）", "allow_package_install"),
+    ("pnpm add", "安装依赖（会执行包安装脚本）", "allow_package_install"),
+    ("pnpm install", "安装依赖（会执行包安装脚本）", "allow_package_install"),
+    ("apt install", "安装软件包", "allow_package_install"),
+    ("apt-get install", "安装软件包", "allow_package_install"),
+    ("snap install", "安装软件包", "allow_package_install"),
+]
 
-def check_banned(cmd: str) -> str | None:
-    """命中黑名单则返回拒绝原因，否则 None。"""
-    low = (cmd or "").lower()
-    for pattern, reason in BANNED_RULES:
-        if pattern.lower() in low:
-            return f"❌ 命令被拒绝（{reason}）：包含禁止的关键字 `{pattern}`"
+# 凭据类文件：**任何时候都拦**（不只是默认拦）。
+# 这些不是项目文件，Agent 没有正当理由读它们；而它们一旦被读进上下文，
+# 下一轮就会随请求发给第三方 LLM API —— 沙箱禁网挡不住这条外发通道。
+CREDENTIAL_PATTERNS = [
+    (r"\.ssh\b", "SSH 凭据目录"),
+    (r"\bid_(rsa|dsa|ecdsa|ed25519)\b", "SSH 私钥"),
+    (r"\.gnupg\b", "GPG 密钥目录"),
+    (r"\.aws/credentials", "AWS 凭据"),
+    (r"\.aws/config", "AWS 配置"),
+    (r"\.kube/config", "Kubernetes 凭据"),
+    (r"\.docker/config\.json", "Docker registry 凭据"),
+    (r"\.git-credentials", "Git 凭据"),
+    (r"\.netrc\b", "netrc 凭据"),
+    (r"\bproviders\.json\b", "本应用的模型密钥库"),
+    (r"\bauth_token\b", "本应用访问令牌"),
+]
+
+# 「需要一次确认」的敏感配置：可能含密钥，但有时确实是正常工作需要
+# （比如要看 .env 里配了什么）。所以不硬拦，只是**不当作安全命令**。
+SENSITIVE_CONFIG_TOKENS = [".env", ".npmrc", ".pypirc", "policy.json"]
+
+
+def _normalize_for_scan(cmd: str) -> str:
+    """把命令归一化成便于子串匹配的形式。
+
+    去掉引号与反斜杠（``r''m -rf`` → ``rm -rf``）、压缩空白、统一小写。
+    这是对付「引号拆词」绕过的最低成本手段 —— 不做词法解析也能挡住常见写法。
+    """
+    buf = []
+    for ch in (cmd or "").lower():
+        if ch in "'\"\\":
+            continue
+        buf.append(ch)
+    return " ".join("".join(buf).split())
+
+
+# 匹配 rm 的递归/强制标志：-r / -R / -rf / -fr / -r -f / --recursive / --force
+_RM_FLAG_RE = re.compile(r"^-[a-z]*[rf][a-z]*$|^--(recursive|force|no-preserve-root)$")
+
+
+def _check_destructive_rm(norm: str) -> str | None:
+    """结构化识别 ``rm -r`` / ``rm -R`` / ``rm -rf`` / ``rm --recursive`` 等组合。
+
+    为什么要单独做：字面量清单只能覆盖写出来的那几种拼写。
+    实测 ``rm -r /path``、``rm -R /path`` 原本**完全放行**。
+    """
+    for seg in re.split(r"[;&|]+", norm):
+        toks = seg.split()
+        # 跳过 sudo / env / command / nohup 之类的前缀包装
+        while toks and toks[0] in ("sudo", "command", "env", "nohup", "time"):
+            toks = toks[1:]
+        if not toks:
+            continue
+        if os.path.basename(toks[0]) != "rm":
+            continue
+        for t in toks[1:]:
+            if _RM_FLAG_RE.match(t):
+                return (
+                    f"❌ 命令被拒绝（递归/强制删除）：`rm {t}` 会让删除不可恢复。"
+                    "如果确实要删目录，请用 delete_file 工具（会先进回收站、可恢复）。"
+                )
     return None
 
 
-def run_command(cmd: str, timeout: int = 15) -> str:
+def _check_destructive_find(norm: str) -> str | None:
+    """``find ... -delete`` / ``-exec`` 是「遍历 + 删除/执行」，一律拦。"""
+    for seg in re.split(r"[;&|]+", norm):
+        toks = seg.split()
+        if not toks or os.path.basename(toks[0]) != "find":
+            continue
+        for t in toks[1:]:
+            if t in ("-delete", "-exec", "-execdir", "-ok", "-okdir"):
+                return (
+                    f"❌ 命令被拒绝（遍历删除/执行）：`find {t}` 会批量删除文件"
+                    "或执行任意命令。要批量删除请逐个用 delete_file（有回收站）。"
+                )
+    return None
+
+
+def _check_credentials(norm: str) -> str | None:
+    """命中凭据文件模式则拒绝。"""
+    for pattern, reason in CREDENTIAL_PATTERNS:
+        if re.search(pattern, norm):
+            return (
+                f"❌ 命令被拒绝（{reason}）：Agent 不需要读取凭据文件。"
+                "这类内容一旦进入对话，就会随之发给大模型 API。"
+            )
+    return None
+
+
+def check_banned(cmd: str) -> str | None:
+    """命中拦截规则则返回拒绝原因，否则 None。
+
+    判定顺序：字面量硬拦 → 结构化硬拦 → 凭据读取 → 策略开关（联网/安装/推送）。
+    """
+    norm = _normalize_for_scan(cmd)
+    if not norm:
+        return None
+
+    for pattern, reason in BANNED_RULES:
+        if pattern.lower() in norm:
+            return f"❌ 命令被拒绝（{reason}）：包含禁止的关键字 `{pattern}`"
+
+    for checker in (_check_destructive_rm, _check_destructive_find, _check_credentials):
+        hit = checker(norm)
+        if hit:
+            return hit
+
+    # 策略开关：默认全关 → 与改动前行为一致
+    import policy
+
+    for pattern, reason, flag in GATED_RULES:
+        if pattern.lower() in norm and not policy.is_enabled(flag):
+            return (
+                f"❌ 命令被拒绝（{reason}）：`{pattern.strip()}` 当前被策略关闭。"
+                f"如需放行，请在 设置 → 执行策略 里打开对应开关"
+                f"（环境变量 {policy.FLAGS[flag]}=1 也可）。"
+            )
+    return None
+
+
+def has_sensitive_config(cmd: str) -> bool:
+    """命令是否碰到「可能含密钥的配置文件」（这类命令要过一次确认）。"""
+    norm = _normalize_for_scan(cmd)
+    return any(token in norm for token in SENSITIVE_CONFIG_TOKENS)
+
+
+# 单条命令的超时上限。模型可以自己调大（构建类命令需要），但不能无限等。
+MAX_COMMAND_TIMEOUT = 600
+
+
+def run_command(cmd: str, timeout: int = 60) -> str:
     """在 Docker 沙箱里执行 shell 命令。
 
     - 命令只在挂载的项目根目录（容器内 /workspace）下执行
-    - 默认 15 秒超时
-    - 危险命令被黑名单拦截
+    - 默认 60 秒超时（模型可用 ``timeout`` 参数调到最大 600）
+    - 危险命令被三层拦截拦住
     - Docker 不可用时**拒绝执行**（除非显式设置 AGENT_ALLOW_HOST_EXEC=1）
+
+    超时原来默认只有 **15 秒** —— 实测踩过：``mvn compile`` 首次要下载依赖，
+    15 秒根本不够，模型只能看到超时然后退回 ``javac`` 单文件编译，
+    等于刚装好的 Maven 白装了。构建类命令一律建议传 ``timeout=300``。
     """
     import runtime
 
@@ -672,6 +845,12 @@ def run_command(cmd: str, timeout: int = 15) -> str:
 
     if len(cmd) > 5000:
         return "❌ 命令太长（超过 5000 字符）"
+
+    try:
+        timeout = int(timeout)
+    except (TypeError, ValueError):
+        timeout = 60
+    timeout = max(1, min(timeout, MAX_COMMAND_TIMEOUT))
 
     # 黑名单检查（含「禁止一切外发」，等级 3 也照样拦）
     banned = check_banned(cmd)
@@ -699,7 +878,13 @@ def _host_run_shell(cmd: str, timeout: int, cancel_event=None) -> str:
     return sandbox.HOST_EXEC_NOTICE + _truncate(out, 3000)
 
 
-# 只读命令前缀（不需要确认，直接执行）
+# 只读命令前缀（等级 2 下不需要确认，直接执行）
+#
+# 加固记录：
+# - 删掉了 ``env`` / ``printenv`` —— 它们会原样打印 ``AGENT_AUTH_TOKEN`` 等密钥，
+#   而判为「安全」意味着等级 2 下**零确认**就能拿到。
+# - ``find`` 保留（开发者天天用），但带 ``-delete`` / ``-exec`` 时一律不算安全
+#   （check_banned 里也已硬拦，这里是第二道）。
 READ_SAFE_PREFIXES = [
     # 只读文件操作
     "ls",
@@ -714,8 +899,6 @@ READ_SAFE_PREFIXES = [
     "which",
     "whoami",
     "date",
-    "env",
-    "printenv",
     # git 只读
     "git status",
     "git log",
@@ -738,13 +921,20 @@ READ_SAFE_PREFIXES = [
 # 写类 / 执行类命令前缀（当前为空 → 一律弹勾叉；如需放行可在此追加）
 WRITE_SAFE_PREFIXES = []
 
+# 这些命令带上这些标志就不是「只读」了
+_DANGEROUS_READ_FLAGS = ("-delete", "-exec", "-execdir", "-ok", "-okdir")
+
 
 def is_safe_command(cmd: str) -> bool:
-    """判断命令是否「安全」（不需要用户确认）
+    """判断命令是否「安全」（等级 2 下不需要用户确认）
 
     分级策略：
     - 读类命令（ls / cat / git status / ...）→ 安全，直接执行
     - 写类 / 执行类命令（mkdir / cp / make / npm install / git commit / ...）→ 一律弹勾叉
+    - **碰到机密配置文件**（.env / .npmrc / providers.json …）→ 不算安全，要一次确认
+
+    注意：这不是安全边界。``run_command`` 里还会再过一次 ``check_banned``，
+    那才是硬拦（凭据读取、递归删除、策略开关）。
     """
     cmd = cmd.strip().lower()
     if not cmd:
@@ -752,6 +942,10 @@ def is_safe_command(cmd: str) -> bool:
 
     # 含管道 / 重定向 / 命令连接符 → 永远视为危险
     if any(c in cmd for c in ["|", ">", "<", "&&", ";", "`", "$("]):
+        return False
+
+    # 碰到可能含密钥的配置文件 → 要一次确认（原本 .env 是零确认就能 cat 的）
+    if has_sensitive_config(cmd):
         return False
 
     # ✅ python xxx.py 安全；python -c 一律危险
@@ -774,6 +968,9 @@ def is_safe_command(cmd: str) -> bool:
     # 只读命令 → 安全
     for prefix in READ_SAFE_PREFIXES:
         if cmd == prefix or cmd.startswith(prefix + " "):
+            # find 带上删除/执行标志就不是只读了
+            if prefix == "find" and any(f in cmd for f in _DANGEROUS_READ_FLAGS):
+                return False
             return True
 
     # 写类命令目前无放行项（WRITE_SAFE_PREFIXES 为空 → 全部弹勾叉）
@@ -1007,83 +1204,126 @@ def project_info() -> str:
         f"📦 当前项目\n"
         f"  路径：{root}\n"
         f"  类型：{project_type}\n"
+        f"  语言分布：{_language_summary(root)}\n"
         f"  顶层结构：\n" + "\n".join(items)
     )
 
 
-def list_symbols(path: str) -> str:
-    """列出 Python 文件的所有函数/类（用 AST）。"""
-    import ast
-    path = _normalize_path(path)
-    if not is_allowed_path(path):
-        return f"❌ 拒绝访问：{path}"
+def _language_summary(root: str) -> str:
+    """按扩展名统计项目里的语言分布（多语言项目一眼看清）。"""
     try:
-        with open(path, encoding="utf-8") as f:
-            tree = ast.parse(f.read())
-    except SyntaxError as e:
-        return f"❌ 语法错误：{e}"
-    except Exception as e:
-        return f"❌ 解析失败：{e}"
+        import repomap
 
-    lines = []
-    for node in tree.body:
-        if isinstance(node, ast.FunctionDef):
-            args = [a.arg for a in node.args.args]
-            lines.append(f"  L{node.lineno}: def {node.name}({', '.join(args)})")
-        elif isinstance(node, ast.ClassDef):
-            lines.append(f"  L{node.lineno}: class {node.name}")
-            for sub in node.body:
-                if isinstance(sub, ast.FunctionDef):
-                    args = [a.arg for a in sub.args.args]
-                    lines.append(f"    L{sub.lineno}: def {sub.name}({', '.join(args)})")
-    return f"📄 {path} 的符号：\n" + "\n".join(lines) if lines else "（无符号）"
+        dist = repomap.detect_language_summary(root)
+    except Exception:                                        # noqa: BLE001
+        return "（统计失败）"
+    if not dist:
+        return "（未识别到源码文件）"
+    top = sorted(dist.items(), key=lambda kv: (-kv[1], kv[0]))[:6]
+    return "、".join(f"{lang} {n} 文件" for lang, n in top)
 
 
-def find_references(symbol: str, path: str = ".") -> str:
-    """在项目里找某个符号的引用。"""
-    import os
-    import re
+def list_symbols(path: str) -> str:
+    """列出文件的所有函数 / 类 / 接口（多语言）。
+
+    【本次修复】
+    1. 原来只支持 Python（直接 ``import ast``）。现在交给 ``repomap``，
+       覆盖 Java / C / C++ / C# / Go / Rust / JS / TS / Kotlin / Swift / PHP / Ruby 等。
+    2. 原来用 ``isinstance(node, ast.FunctionDef)`` 判断，而
+       ``ast.AsyncFunctionDef`` **不是** ``ast.FunctionDef`` 的子类 ——
+       于是所有 ``async def`` 在这个工具里**完全不可见**。
+       现代 Python 项目（FastAPI / aiohttp / 任何异步代码）里这是致命的。
+    3. 原来只遍历 ``tree.body`` 和类的一层，嵌套函数、内部类看不到。
+    """
+    import repomap
+
     path = _normalize_path(path)
     if not is_allowed_path(path):
         return f"❌ 拒绝访问：{path}"
-    pattern = re.compile(r'\b' + re.escape(symbol) + r'\b')
+    if not os.path.isfile(path):
+        return f"❌ 不是文件：{path}"
+
+    # Python 文件先单独试解析：语法错误本身是**给模型的重要信号**
+    # （「这文件现在编译不过」），比干巴巴一句「（无符号）」有用得多。
+    # repomap 对解析失败一律返回 []（它要服务于全仓扫描，不能因为一个坏文件就炸），
+    # 所以这里把诊断信息补回来。
+    if path.endswith(".py"):
+        import ast
+
+        try:
+            with open(path, encoding="utf-8", errors="ignore") as f:
+                ast.parse(f.read())
+        except SyntaxError as e:
+            return f"❌ 语法错误：{e}"
+
+    return repomap.list_symbols_text(path)
+
+
+def find_references(symbol: str, path: str = ".", max_results: int = 50) -> str:
+    """在项目里找某个符号的引用（多语言，按文本搜索）。"""
+    import repomap
+
+    path = _normalize_path(path)
+    if not is_allowed_path(path):
+        return f"❌ 拒绝访问：{path}"
+    if not symbol or not symbol.strip():
+        return "❌ symbol 为空"
+    pattern = re.compile(r"\b" + re.escape(symbol.strip()) + r"\b")
     results = []
+    scanned = 0
     for root, dirs, files in os.walk(path):
-        dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('__pycache__', 'node_modules', '.venv')]
-        for fname in files:
-            if not fname.endswith('.py'):
-                continue
+        dirs[:] = [
+            d
+            for d in dirs
+            if not d.startswith(".")
+            and d not in ("__pycache__", "node_modules", ".venv", "venv", "dist", "build", "target")
+        ]
+        for fname in sorted(files):
             fpath = os.path.join(root, fname)
+            # 原来这里写死 `if not fname.endswith('.py'): continue`
+            # → 在 Java / Go / TS 项目里永远返回「未找到」
+            if not repomap.is_probably_text(fpath):
+                continue
+            scanned += 1
             try:
                 with open(fpath, encoding="utf-8", errors="ignore") as f:
                     for i, line in enumerate(f, 1):
                         if pattern.search(line):
                             rel = os.path.relpath(fpath, path)
                             results.append(f"{rel}:{i}: {line.strip()[:120]}")
-                            if len(results) >= 50:
+                            if len(results) >= max_results:
                                 break
             except Exception:
                 continue
-    return f"'{symbol}' 的引用（{len(results)} 处）：\n" + "\n".join(results) if results else f"未找到 '{symbol}'"
+        if len(results) >= max_results:
+            break
+    if not results:
+        return f"未找到 '{symbol}'（已扫描 {scanned} 个文本文件）"
+    return f"'{symbol}' 的引用（{len(results)} 处）：\n" + "\n".join(results)
 
 
 def get_function_body(path: str, func_name: str) -> str:
-    """读取某个函数的完整代码。"""
-    import ast
+    """读取某个函数 / 方法的完整代码（多语言）。"""
+    import repomap
+
     path = _normalize_path(path)
     if not is_allowed_path(path):
         return f"❌ 拒绝访问：{path}"
+    if not func_name or not func_name.strip():
+        return "❌ 函数名为空"
+
+    span = repomap.find_definition(path, func_name.strip())
+    if not span:
+        return f"❌ 未找到函数：{func_name}（{repomap.language_of(path) or '未知语言'}）"
+
+    start, end = span
     try:
-        with open(path, encoding="utf-8") as f:
-            source = f.read()
-        tree = ast.parse(source)
-    except Exception as e:
-        return f"❌ 解析失败：{e}"
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == func_name:
-            lines = source.splitlines()
-            return f"函数 {func_name}（L{node.lineno}-L{node.end_lineno}）：\n" + "\n".join(lines[node.lineno-1:node.end_lineno])
-    return f"❌ 未找到函数：{func_name}"
+        with open(path, encoding="utf-8", errors="ignore") as f:
+            lines = f.read().splitlines()
+    except Exception as e:                                   # noqa: BLE001
+        return f"❌ 读取失败：{e}"
+    body = "\n".join(lines[start - 1:end])
+    return f"函数 {func_name}（L{start}-L{end}）：\n{body}"
 
 
 def multi_edit(edits: list) -> str:
@@ -1405,7 +1645,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "读读取文本文件。",
+            "description": "读取文本文件（默认只返回前 500 行；更多内容用 read_file_range 或调大 max_lines）。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1423,7 +1663,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "search_files",
-            "description": "递归搜索文件内容。",
+            "description": "递归搜索文件内容。支持所有编程语言与文本文件（py/java/c/cpp/go/rs/ts/js 等），自动跳过二进制与构建目录。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1525,11 +1765,19 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "run_command",
-            "description": "Docker 沙箱里执行命令。",
+            "description": (
+                "在 Docker 沙箱里执行 shell 命令（工作目录 = 项目根）。"
+                "默认超时 60 秒；构建类命令（mvn / gradle / npm ci / cargo build）"
+                "首次要下载依赖，请显式把 timeout 调大（如 300）。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "cmd": {"type": "string", "description": "要执行的 shell 命令。"}
+                    "cmd": {"type": "string", "description": "要执行的 shell 命令。"},
+                    "timeout": {
+                        "type": "integer",
+                        "description": "超时秒数，默认 60，最大 600。构建/安装类命令建议 300。",
+                    },
                 },
                 "required": ["cmd"],
             },
@@ -1687,11 +1935,11 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "list_symbols",
-            "description": "列出 Python 文件的所有函数/类（用 AST 解析）。",
+            "description": "列出文件里的函数/类/接口/方法（支持 py/java/c/cpp/cs/go/rs/js/ts/kt/swift/php/rb 等），含行号。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Python 文件路径。"}
+                    "path": {"type": "string", "description": "源文件路径（按扩展名自动识别语言）。"}
                 },
                 "required": ["path"],
             },
@@ -1716,11 +1964,11 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "get_function_body",
-            "description": "读取某个函数的完整代码（只读该函数）。",
+            "description": "读取某个函数/方法的完整代码（多语言，只返回该函数这段）。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Python 文件路径。"},
+                    "path": {"type": "string", "description": "源文件路径（多语言）。"},
                     "func_name": {"type": "string", "description": "函数名。"},
                 },
                 "required": ["path", "func_name"],
@@ -1839,6 +2087,19 @@ CORE_TOOLS = [
     "find_references",
     "get_function_body",
     "run_python",
+    # run_command 必须**常驻**。
+    #
+    # 它原来只靠中文关键词注入（"命令" / "git" / "shell" / "pytest" / "跑一下" /
+    # "make" / "npm"…），于是「把这个项目跑起来」「安装依赖」「编译一下」
+    # 这类最普通的说法**拿不到这个工具** —— 而 git_commit / git_rollback
+    # 反而是常驻的。结果是「危险工具永远在，干活的工具看运气」。
+    #
+    # 对多语言项目这条尤其致命：Java 要 mvn/gradle、C/C++ 要 gcc/cmake/make，
+    # 全都得靠 run_command；没有它，那些语言的支持只剩「读」，不能「跑」。
+    #
+    # 可用性 ≠ 风险：run_command 仍然要过「等级 ≥2 → 确认」+ 三层命令拦截，
+    # 策略开关也照旧生效。
+    "run_command",
     "create_plan",
     "update_plan",
     "get_plan",

@@ -113,11 +113,14 @@ def test_cancel_saves_resumable_state(monkeypatch):
     events = list(agent.run_agent_stream("随便干点啥", session_id="s1", user_api_key="k"))
     types = [e["type"] for e in events]
 
-    # 开头可能有 run_started（告诉前端是第几轮），其余第一个事件必须是 cancelled
-    core = [t for t in types if t != "run_started"]
+    # 开头的 run_started / project_context / repo_map 都是**信息性事件**
+    # （告诉前端本轮上下文里注入了什么），与「取消是否立即生效」无关，先滤掉。
+    _informational = {"run_started", "project_context", "repo_map"}
+    core = [t for t in types if t not in _informational]
     assert core[0] == "cancelled", types
     assert types[-1] == "done"
-    assert "可从断点继续" in events[0]["content"]
+    _cancelled = next(e for e in events if e["type"] == "cancelled")
+    assert "可从断点继续" in _cancelled["content"]
 
     state = runtime.get_pending_state("s1")
     assert state is not None, "取消时没有保存断点，用户无法继续"

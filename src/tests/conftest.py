@@ -29,6 +29,11 @@ os.environ.setdefault("AGENT_SETTINGS_PATH", os.path.join(_TMP_DIR, "providers.j
 os.environ.setdefault("AGENT_MCP_PATH", os.path.join(_TMP_DIR, "mcp.json"))
 # 回收站也要隔离：只隔离 DB 的话，跑一批任务会往真实 data/.trash 里塞备份
 os.environ.setdefault("AGENT_TRASH_DIR", os.path.join(_TMP_DIR, "trash"))
+# 执行策略开关（联网/安装/推送/评审跑测试）同理：测试绝不能改到真实的 data/policy.json
+os.environ.setdefault("AGENT_POLICY_PATH", os.path.join(_TMP_DIR, "policy.json"))
+# 沙箱的包管理器缓存（~/.m2、~/.cache/pip）也要隔离：
+# 不隔离的话，光跑一次 _build_docker_cmd 的用例就会在真实 home 里建出 ~/.m2
+os.environ.setdefault("AGENT_CACHE_HOME", os.path.join(_TMP_DIR, "cache-home"))
 
 import pytest  # noqa: E402
 

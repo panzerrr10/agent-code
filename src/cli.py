@@ -56,9 +56,25 @@ def print_event(event, verbose=True):
                 status = item.get("status", "pending")
                 icon = {"done": "✓", "failed": "✗", "doing": "⏳", "pending": " "}.get(status, " ")
                 print(f"  {i}. [{icon}] {item.get('step')}")
+    elif t == "context_stats" and verbose:
+        # 把压缩与缓存放在一起看：压缩**改写了多少**直接决定后面还能不能命中前缀
+        print(
+            f"\n\033[90m[压缩] {event.get('before_tokens')} → "
+            f"{event.get('after_tokens')} tokens"
+            f"（剪枝 {event.get('pruned')} · 折叠 {event.get('folded')} 步"
+            f" · 截断 user {event.get('user_truncated')}"
+            f" · 仍超预算={event.get('over_budget')}）\033[0m"
+        )
     elif t == "token_usage" and verbose:
         total = event.get("total_tokens", 0)
-        print(f"\n\033[90m[Token] {total} tokens\033[0m")
+        hit = event.get("cache_hit_tokens") or 0
+        miss = event.get("cache_miss_tokens") or 0
+        rate = event.get("cache_hit_rate")
+        cache_txt = "缓存: 该厂商未上报"
+        if hit or miss:
+            pct = f"{rate:.0%}" if isinstance(rate, (int, float)) else "?"
+            cache_txt = f"缓存命中 {hit}/{hit + miss} ({pct})"
+        print(f"\n\033[90m[Token] {total} tokens · {cache_txt}\033[0m")
     elif t == "error":
         print(f"\n\033[31m[错误]\033[0m {event.get('content')}")
     elif t == "done":

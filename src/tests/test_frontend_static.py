@@ -530,3 +530,98 @@ def test_flat_layout_keeps_inline_code_visible():
         "缺少行内 code 的独立底色规则"
     # 搜索命中时仍要能看出是哪条
     assert ".msg.assistant.search-match .bubble" in html, "搜索命中高亮丢了"
+
+
+# ============ 会话用量条（总 token + 缓存命中率）============
+
+
+def _html() -> str:
+    with open(INDEX, encoding="utf-8") as f:
+        return f.read()
+
+
+def test_session_stats_bar_exists_below_input_area():
+    """用量条必须在**输入区下方**（不是框里），且顺手把输入区底 padding 收窄。
+
+    用户的原话：「就一小段文本在输入框的下方而不是在输入框里，
+    把输入框稍微移上去一点，留那么一些空间」。
+    """
+    html = _html()
+    assert 'id="sessionStats"' in html
+    assert 'id="sessionStatsText"' in html
+    # 位置：必须排在 .input-area 的结束之后
+    input_area_end = html.index('id="stopBtn"')
+    stats_pos = html.index('id="sessionStats"')
+    assert stats_pos > input_area_end, "用量条必须在输入区之后（即下方）"
+    # 输入区底 padding 必须收窄过，否则要多占一条高度
+    assert ".input-area {" in html
+    # 允许 { 和 padding 之间夹注释
+    m = re.search(r"\.input-area \{.*?padding:\s*14px 20px (\d+)px;", html, re.S)
+    assert m and int(m.group(1)) <= 6, "输入区底 padding 没收窄，输入框不会上移"
+
+
+def test_session_stats_css_is_small_and_muted():
+    """「不用太大」——字号要小、颜色要弱，别抢输入框的注意力。"""
+    html = _html()
+    m = re.search(r"\.session-stats \{(.*?)\}", html, re.S)
+    assert m, "缺少 .session-stats 样式"
+    css = m.group(1)
+    assert re.search(r"font-size:\s*1[0-2]px", css), "用量条字号应 ≤12px"
+    assert "white-space: nowrap" in css, "长文案换行会把输入区顶上去"
+    assert "text-overflow: ellipsis" in css
+
+
+def test_session_usage_helpers_are_defined():
+    js = _inline_js()
+    for fn in ("emptyUsage", "resetUsage", "addUsage",
+               "rebuildUsageFromHistory", "formatUsage",
+               "renderSessionStats", "forgetUsage"):
+        assert re.search(rf"function {fn}\b", js), f"缺少 {fn}"
+
+
+def test_usage_is_accumulated_in_memory_step_not_only_dom():
+    """累加必须发生在「先写内存」那一步。
+
+    SSE 处理分三步，第三步才碰 DOM 且只在「用户正看这个会话」时执行。
+    如果把累加写在第三步，**后台跑完的会话用量就丢了** —— 切回去是空的。
+    """
+    js = _inline_js()
+    mem = js.index("先写内存")
+    dom = js.index("用户不在本会话")
+    seg = js[mem:dom]
+    assert "addUsage(run.sessionId, ev)" in seg, "addUsage 不在内存步骤里"
+
+
+def test_usage_rebuilt_from_history_on_switch():
+    js = _inline_js()
+    assert "rebuildUsageFromHistory(sessionId, messages)" in js
+    # 重建必须用「全量 messages」，不是只渲染的那 30 条
+    assert "HISTORY_RENDER_LIMIT" in js
+
+
+def test_usage_not_overwritten_while_session_running():
+    """会话还在跑时不能用历史覆盖：那一轮还没落库，覆盖会把实时数字抹掉。"""
+    js = _inline_js()
+    assert re.search(r"_st\.status !== \"running\"", js), "缺少运行中保护"
+
+
+def test_cache_rate_denominator_is_prompt_tokens():
+    """命中率分母必须是**输入 tokens**，且只在有缓存数据的那几轮里累加。
+
+    若用 hit+miss 当分母，厂商少报一个字段就会算成 100%。
+    """
+    js = _inline_js()
+    assert "u.cachePrompt" in js
+    assert "u.hit / u.cachePrompt" in js
+
+
+def test_no_cache_data_shows_unreported_not_zero():
+    """厂商不上报缓存字段时显示「未上报」，不能显示 0%。"""
+    js = _inline_js()
+    assert "缓存 未上报" in js
+    assert "hasCache" in js
+
+
+def test_delete_session_forgets_usage():
+    js = _inline_js()
+    assert "forgetUsage(s.id)" in js

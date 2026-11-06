@@ -1161,6 +1161,36 @@ def api_providers():
     })
 
 
+@app.route("/api/policy", methods=["GET"])
+def api_policy_get():
+    """返回执行策略开关的当前状态。
+
+    这四个开关决定 Agent 能不能联网 / 装依赖 / 推代码 / 在评审阶段跑测试。
+    默认值与原行为一致（外发全关），改这里就等于显式授权。
+    """
+    import policy
+
+    return jsonify(policy.snapshot())
+
+
+@app.route("/api/policy", methods=["POST"])
+def api_policy_set():
+    """更新执行策略开关。
+
+    注意：如果是被环境变量锁定的开关（``AGENT_ALLOW_*``），
+    写文件不会改变生效值 —— 所以这里把 ``locked_by_env`` 一起回给前端，
+    让界面能明确告诉用户「这项被环境变量接管了」，而不是让他反复点却没反应。
+    """
+    import policy
+
+    data = request.get_json(silent=True) or {}
+    try:
+        policy.set_policy(data)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(policy.snapshot())
+
+
 @app.route("/run", methods=["POST"])
 def run():
     data = request.get_json(silent=True) or {}
@@ -1303,6 +1333,11 @@ def run():
                         "prompt_tokens": event.get("prompt_tokens"),
                         "completion_tokens": event.get("completion_tokens"),
                         "total_tokens": event.get("total_tokens"),
+                        # 缓存命中一并落库：刷新页面后还能回看这一轮的命中率，
+                        # 否则「历史里看不到缓存表现」，优化就无从对比。
+                        "cache_hit_tokens": event.get("cache_hit_tokens"),
+                        "cache_miss_tokens": event.get("cache_miss_tokens"),
+                        "cache_hit_rate": event.get("cache_hit_rate"),
                         "steps": event.get("steps"),
                     }
 
@@ -1780,8 +1815,13 @@ def run_multi():
                     api_key=planner_api_key,
                     base_url=planner_base_url,
                     model=planner_model,
+                    project_root=_rt_multi.get_project_root(),
                 )
                 yield f"data: {json.dumps({'type': 'plan_from_planner', 'plan': plan}, ensure_ascii=False)}\n\n"
+                if plan.get("explored"):
+                    # Planner 现在会先只读探索项目再规划 —— 让用户看到它查了几个文件，
+                    # 而不是「凭空冒出一份计划」
+                    yield f"data: {json.dumps({'type': 'planner_explored', 'tool_calls': plan['explored']}, ensure_ascii=False)}\n\n"
 
                 if plan.get("error"):
                     error_msg = f"⚠️ 规划失败：{plan.get('error')}，降级为单 Agent 模式"
@@ -1882,6 +1922,8 @@ def run_multi():
             db.save_message(session_id, "assistant", saved)
 
             # ========== Step 3: Reviewer 审查 ==========
+            # Reviewer 现在能自己读文件、跑测试（见 reviewer.py 的说明），
+            # 所以「评审通过」不再只是「相信 Executor 的自述」。
             yield f"data: {json.dumps({'type': 'phase', 'name': 'reviewer', 'status': 'doing'}, ensure_ascii=False)}\n\n"
             review_result = review(
                 task,
@@ -1890,8 +1932,12 @@ def run_multi():
                 api_key=reviewer_api_key,
                 base_url=reviewer_base_url,
                 model=reviewer_model,
+                project_root=_rt_multi.get_project_root(),
             )
             yield f"data: {json.dumps({'type': 'review_result', 'result': review_result}, ensure_ascii=False)}\n\n"
+            if not review_result.get("tests_run"):
+                # 明说「本次评审没有硬证据」，避免用户把「评审通过」读成「测试通过」
+                yield f"data: {json.dumps({'type': 'review_note', 'content': '本次评审未运行测试，结论基于静态审查。'}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'type': 'phase', 'name': 'reviewer', 'status': 'done'}, ensure_ascii=False)}\n\n"
 
             yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
