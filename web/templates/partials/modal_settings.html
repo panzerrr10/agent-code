@@ -1,0 +1,337 @@
+<!-- 设置面板（左下角齿轮打开）-->
+<div class="modal-overlay" id="settingsModal" style="display: none;"
+    onclick="if(event.target===this) closeSettings()">
+    <div class="modal-box settings-box">
+        <!-- 添加 / 编辑提供商的表单（叠在设置面板之上） -->
+        <div class="prov-form-mask" id="provFormMask" style="display: none;">
+            <div class="prov-form">
+                <h4 id="provFormTitle">添加模型提供商</h4>
+                <label>名称 <span class="req">*</span>
+                    <input type="text" id="pfName" placeholder="例如：我的 DeepSeek" autocomplete="off">
+                </label>
+                <label>Base URL <span class="req">*</span>
+                    <input type="text" id="pfUrl" placeholder="https://api.deepseek.com/v1"
+                           autocomplete="off" spellcheck="false">
+                </label>
+                <label>API Key
+                    <input type="password" id="pfKey" placeholder="sk-...（本地模型可留空）" autocomplete="off">
+                    <span class="pf-note" id="pfKeyNote"></span>
+                </label>
+                <label>模型名称 <span class="req">*</span>
+                    <textarea id="pfModels" rows="3"
+                        placeholder="每行一个，或逗号分隔&#10;deepseek-chat&#10;deepseek-reasoner"></textarea>
+                </label>
+                <label class="pf-check">
+                    <input type="checkbox" id="pfEmbedding">
+                    <span>支持 embedding（知识库可用这家做向量检索）</span>
+                </label>
+                <div class="pf-actions">
+                    <button class="fp-btn" onclick="closeProviderForm()">取消</button>
+                    <button class="fp-btn" id="pfTestBtn" onclick="testProviderForm(this)">测试连接</button>
+                    <button class="fp-btn primary" id="pfSaveBtn" onclick="submitProviderForm(this)">保存</button>
+                </div>
+                <div class="pf-result" id="pfResult"></div>
+            </div>
+        </div>
+        <div class="modal-head">
+            <span>⚙️ 设置</span>
+            <button class="icon-btn" onclick="closeSettings()" title="关闭">✕</button>
+        </div>
+        <div class="settings-layout">
+            <nav class="settings-nav" id="settingsNav">
+                <button type="button" class="snav-item active" data-page="general" onclick="showSettingsPage('general')"><span class="snav-icon">🔧</span><span>通用设置</span></button>
+                <button type="button" class="snav-item" data-page="keys" onclick="showSettingsPage('keys')"><span class="snav-icon">🔑</span><span>模型与密钥</span></button>
+                <button type="button" class="snav-item" data-page="agents" onclick="showSettingsPage('agents')"><span class="snav-icon">📋</span><span>项目约定</span></button>
+                <button type="button" class="snav-item" data-page="mcp" onclick="showSettingsPage('mcp')"><span class="snav-icon">🔌</span><span>内置插件</span></button>
+                <button type="button" class="snav-item" data-page="kb" onclick="showSettingsPage('kb')"><span class="snav-icon">📚</span><span>知识库</span></button>
+                <button type="button" class="snav-item" data-page="policy" onclick="showSettingsPage('policy')"><span class="snav-icon">🛡️</span><span>执行策略</span></button>
+            </nav>
+            <div class="settings-pages">
+                <div class="spage" data-page="policy">
+                <section class="set-sec">
+                    <h4>🛡️ 执行策略（危险动作放行）</h4>
+                    <p class="set-hint">
+                        默认：<strong>允许装依赖</strong>（否则遇到 <code>ModuleNotFoundError</code> 就死）、
+                        <strong>不</strong>允许联网、<strong>不</strong>允许推送。
+                        <br>⚠️ 因为装依赖默认开，沙箱容器默认是 <code>bridge</code> 网络 ——
+                        <code>curl</code>/<code>git pull</code> 仍在命令层被拦，但
+                        <code>run_python</code> 里的 <code>requests</code> 能直接出网。
+                    </p>
+                    <p class="set-hint warn" id="policyEnvWarn" style="display:none;">
+                        ⚠️ 有开关被<strong>环境变量</strong>接管了，界面上改了也不生效。
+                        想用界面控制，请去掉 <code>AGENT_ALLOW_*</code> 环境变量后重启。
+                    </p>
+                    <div class="set-rows" id="policyRows">
+                        <div class="set-row">
+                            <label>
+                                <input type="checkbox" id="polAllowNetwork" onchange="setPolicyFlag('allow_network', this.checked)">
+                                <span>允许联网（<code>curl</code> / <code>wget</code> / <code>git fetch|pull|clone</code>）</span>
+                            </label>
+                            <p class="set-hint">打开后沙箱容器也会从 <code>--network=none</code> 切到 <code>bridge</code>，否则命令放行了容器里还是出不去。</p>
+                        </div>
+                        <div class="set-row">
+                            <label>
+                                <input type="checkbox" id="polAllowInstall" onchange="setPolicyFlag('allow_package_install', this.checked)">
+                                <span>允许安装依赖（<code>pip</code> / <code>npm</code> / <code>yarn</code> / <code>pnpm</code> / <code>uv</code> / <code>apt</code>）</span>
+                            </label>
+                            <p class="set-hint">安装会执行包自带的安装脚本（postinstall），这是它比「单纯下载」更危险的地方。</p>
+                        </div>
+                        <div class="set-row">
+                            <label>
+                                <input type="checkbox" id="polAllowPush" onchange="setPolicyFlag('allow_git_push', this.checked)">
+                                <span>允许推送到远端（<code>git push</code>）</span>
+                            </label>
+                            <p class="set-hint">单独一项，因为它会把你的代码发到外部服务。</p>
+                        </div>
+                        <div class="set-row">
+                            <label>
+                                <input type="checkbox" id="polAllowReviewerTests" onchange="setPolicyFlag('allow_reviewer_tests', this.checked)">
+                                <span>评审阶段自动跑测试</span>
+                            </label>
+                            <p class="set-hint">
+                                多 Agent 模式下，Reviewer 会自己读改动过的代码、并跑一次测试来核实结果。
+                                关掉它 → 评审只做静态审查（结论里会注明「未运行测试」）。
+                                等级 1（只读）下无论如何都不会跑。
+                            </p>
+                        </div>
+                    </div>
+                    <p class="set-hint" id="policyPathHint"></p>
+                </section>
+                </div>
+                <div class="spage active" data-page="general">
+                <section class="set-sec">
+                    <h4>🤖 大模型（单 Agent）</h4>
+                    <div class="model-picker" id="settingsModelPicker">
+                        <button type="button" id="settingsModelPickerBtn" onclick="toggleModelPicker(event, 'settingsModelPickerDropdown')">
+                            <span id="settingsModelPickerIcon">🐳</span>
+                            <span id="settingsModelPickerLabel">加载中…</span>
+                            <span class="arrow">▾</span>
+                        </button>
+                        <div class="model-picker-dropdown" id="settingsModelPickerDropdown"></div>
+                    </div>
+                    <p class="set-hint">对话输入框底部也能直接切换，不必打开这里。</p>
+                </section>
+
+                <section class="set-sec">
+                    <h4>👥 多 Agent 角色模型</h4>
+                    <p class="set-hint">切到「多 Agent」模式后，三个角色分别用哪个模型。</p>
+                    <div class="multi-agent-pickers" id="multiAgentPickers" style="display: flex;">
+                    <div class="role-picker" id="plannerPicker">
+                    <span class="role-label">📋 规划</span>
+                    <button type="button" class="role-picker-btn" id="plannerPickerBtn" onclick="toggleRolePicker('planner', event)">
+                    <span id="plannerPickerIcon">🐳</span>
+                    <span id="plannerPickerLabel">DeepSeek · deepseek-chat</span>
+                    <span class="arrow">▾</span>
+                    </button>
+                    <div class="role-picker-dropdown" id="plannerPickerDropdown"></div>
+                    </div>
+                    <div class="role-picker" id="executorPicker">
+                    <span class="role-label">⚙️ 执行</span>
+                    <button type="button" class="role-picker-btn" id="executorPickerBtn" onclick="toggleRolePicker('executor', event)">
+                    <span id="executorPickerIcon">🐳</span>
+                    <span id="executorPickerLabel">DeepSeek · deepseek-chat</span>
+                    <span class="arrow">▾</span>
+                    </button>
+                    <div class="role-picker-dropdown" id="executorPickerDropdown"></div>
+                    </div>
+                    <div class="role-picker" id="reviewerPicker">
+                    <span class="role-label">🔍 审查</span>
+                    <button type="button" class="role-picker-btn" id="reviewerPickerBtn" onclick="toggleRolePicker('reviewer', event)">
+                    <span id="reviewerPickerIcon">🐳</span>
+                    <span id="reviewerPickerLabel">DeepSeek · deepseek-chat</span>
+                    <span class="arrow">▾</span>
+                    </button>
+                    <div class="role-picker-dropdown" id="reviewerPickerDropdown"></div>
+                    </div>
+                    </div>
+                </section>
+
+                </div>
+                <div class="spage" data-page="keys">
+                <section class="set-sec">
+                    <div class="prov-head">
+                        <h4 style="margin:0;">🔑 模型提供商</h4>
+                        <button class="fp-btn primary" onclick="openProviderForm()">＋ 添加模型提供商</button>
+                    </div>
+                    <p class="set-hint">
+                        这里配置的提供商就是全部 —— 代码里没有任何预设。
+                        想接哪家就加哪家，填名称、Base URL、API Key 与模型名称即可。
+                    </p>
+                    <div id="providerKeys" class="key-list"></div>
+                </section>
+
+                <section class="set-sec" id="provDefaultsSec">
+                    <h4>🎯 默认与用途</h4>
+                    <div class="prov-selects">
+                        <label class="prov-sel">
+                            <span>默认提供商</span>
+                            <select id="provDefaultSel" onchange="setDefaultProvider(this.value)"></select>
+                        </label>
+                        <label class="prov-sel">
+                            <span>知识库用的嵌入模型</span>
+                            <select id="provRagSel" onchange="setRagProvider(this.value)"></select>
+                        </label>
+                    </div>
+                    <p class="set-hint">
+                        知识库（向量检索）需要一家支持 embedding 的提供商；
+                        不选则退到默认提供商。
+                    </p>
+                </section>
+
+                <section class="set-sec">
+                    <p class="set-hint warn">
+                        🔒 密钥只保存在<b>服务端</b>（<code>data/providers.json</code>，权限 600），
+                        浏览器永远拿不到完整值，只显示掩码。<br>
+                        ⚠️ Base URL 填什么，密钥就会被发到那个地址，请只填你信任的端点。
+                    </p>
+                </section>
+
+                </div>
+                <div class="spage" data-page="agents">
+                <section class="set-sec">
+                    <h4>📋 项目约定（AGENTS.md）</h4>
+                    <p class="set-hint" style="margin: 0 0 8px;">
+                        给 Agent 注入这个项目的约定与背景。支持三个位置（按优先级）：
+                        <code>&lt;工作区&gt;/AGENTS.md</code>、
+                        <code>&lt;工作区&gt;/.agentcode/AGENTS.md</code>、
+                        <code>~/.agentcode/AGENTS.md</code>。项目级在前、用户级在后合并。
+                    </p>
+                    <div id="pcStatus"></div>
+                    <div class="mcp-actions">
+                        <button class="fp-btn primary" id="pcEditBtn" onclick="editProjectContext()">新建 / 编辑</button>
+                        <button class="fp-btn" onclick="loadProjectContext()">↻ 刷新</button>
+                    </div>
+                    <pre id="pcPreview" class="pc-preview" style="display: none;"></pre>
+                </section>
+
+                </div>
+                <div class="spage" data-page="mcp">
+                <section class="set-sec">
+                    <h4>🔌 MCP 插件</h4>
+                    <label class="mcp-global">
+                        <input type="checkbox" id="mcpInjectToggle" onchange="setMcpInject(this.checked)">
+                        <span>让 Agent 使用 MCP 工具</span>
+                        <span class="set-hint" style="margin: 0;">（关掉后插件仍然连着，只是不告诉模型）</span>
+                    </label>
+                    <div id="mcpServers" class="mcp-list"></div>
+                    <div class="mcp-actions">
+                        <button class="fp-btn" onclick="showMcpCatalog()">📦 从目录添加</button>
+                        <button class="fp-btn" onclick="showMcpForm()">+ 手动添加</button>
+                        <button class="fp-btn" onclick="loadMcpServers()">↻ 刷新状态</button>
+                    </div>
+
+                    <div id="mcpCatalog" class="mcp-catalog" style="display: none;"></div>
+
+                    <div id="mcpForm" class="mcp-form" style="display: none;">
+                        <div class="mcp-field">
+                            <label>名称</label>
+                            <input type="text" id="mcpName" placeholder="filesystem（只能用字母数字_-）">
+                        </div>
+                        <div class="mcp-field">
+                            <label>类型</label>
+                            <select id="mcpTransport" onchange="onMcpTransportChange()">
+                                <option value="stdio">stdio · 本地进程（最常用）</option>
+                                <option value="http">http · 远程 streamable-http</option>
+                                <option value="sse">sse · 远程 SSE（旧式）</option>
+                            </select>
+                        </div>
+                        <div class="mcp-field mcp-stdio-only">
+                            <label>启动命令</label>
+                            <input type="text" id="mcpCommand" placeholder="npx">
+                        </div>
+                        <div class="mcp-field mcp-stdio-only">
+                            <label>参数</label>
+                            <input type="text" id="mcpArgs" placeholder="-y @modelcontextprotocol/server-filesystem /home/pz/下载">
+                            <span class="set-hint" style="margin: 0;">空格分隔</span>
+                        </div>
+                        <div class="mcp-field mcp-remote-only" style="display: none;">
+                            <label>URL</label>
+                            <input type="text" id="mcpUrl" placeholder="https://example.com/mcp">
+                        </div>
+                        <div class="mcp-field">
+                            <label>权限档位</label>
+                            <select id="mcpPermission">
+                                <option value="mutate">mutate · 每次调用都要我确认（默认）</option>
+                                <option value="read">read · 视为只读，不确认</option>
+                                <option value="execute">execute · 按命令类处理</option>
+                                <option value="internal">internal · 会话内部状态</option>
+                            </select>
+                        </div>
+                        <div class="mcp-field">
+                            <label>注入时机</label>
+                            <select id="mcpInject">
+                                <option value="auto">auto · 任务命中关键词才注入（省 token，默认）</option>
+                                <option value="always">always · 每次对话都注入</option>
+                                <option value="never">never · 不注入给模型</option>
+                            </select>
+                        </div>
+                        <div class="mcp-field">
+                            <label>关键词</label>
+                            <input type="text" id="mcpKeywords" placeholder="逗号分隔，auto 模式下用（留空则用名称与工具名）">
+                        </div>
+                        <div class="mcp-stdio-only">
+                            <label class="mcp-net">
+                                <input type="checkbox" id="mcpSandbox" onchange="onMcpSandboxChange()">
+                                <span>📦 在 Docker 沙箱里运行（推荐）</span>
+                            </label>
+                            <div id="mcpSandboxOpts" style="display: none;">
+                                <div class="mcp-field">
+                                    <label>镜像</label>
+                                    <input type="text" id="mcpSandboxImage" placeholder="agent-mcp-sandbox">
+                                </div>
+                                <div class="mcp-field">
+                                    <label>挂载目录</label>
+                                    <input type="text" id="mcpSandboxMounts" placeholder="/home/pz/下载（逗号分隔）">
+                                </div>
+                                <p class="set-hint" style="margin: 0 0 7px;">
+                                    沙箱里<b>看不到</b>没挂载的目录，断网由下面的联网开关控制。
+                                    npx 类插件需要 <code>agent-mcp-sandbox</code> 镜像
+                                    （<code>docker build -f scripts/mcp-sandbox.Dockerfile -t agent-mcp-sandbox .</code>）。
+                                </p>
+                            </div>
+                        </div>
+
+                        <label class="mcp-net">
+                            <input type="checkbox" id="mcpAllowNetwork">
+                            <span>🌐 允许该插件联网</span>
+                        </label>
+
+                        <label class="mcp-net">
+                            <input type="checkbox" id="mcpAutoReconnect" checked>
+                            <span>🔁 进程挂掉后自动重连（看门狗）</span>
+                        </label>
+                        <div class="mcp-form-btns">
+                            <button class="fp-btn primary" onclick="saveMcpServer()">保存</button>
+                            <button class="fp-btn" onclick="hideMcpForm()">取消</button>
+                        </div>
+                    </div>
+
+                    <p class="set-hint warn">
+                        ⚠️ MCP 插件是<b>第三方程序，直接运行在你的电脑上</b>（不在 Docker 沙箱里），
+                        拥有和你同等的权限。只添加你信任的插件。<br>
+                        新插件默认<b>不启用</b>、默认<b>不允许联网</b>；联网必须在上面显式勾选。<br>
+                        插件的工具一律以 <code>mcp__名称__工具</code> 命名，不会覆盖内置工具。
+                    </p>
+                </section>
+
+                </div>
+                <div class="spage" data-page="kb">
+                <section class="set-sec">
+                    <h4>📚 知识库</h4>
+                    <div class="doc-header" style="padding: 0 0 6px;">
+                        <span class="set-hint" style="margin: 0;">上传的文档会用于 RAG 检索</span>
+                        <button class="icon-btn-mini" onclick="triggerUpload()" title="上传文档">+</button>
+                    </div>
+                    <div class="doc-list" id="docList"></div>
+                    <input type="file" id="fileInput" accept=".txt,.md,.pdf,.docx" style="display: none;"
+                        onchange="handleFileUpload(event)">
+                </section>
+
+                </div>
+            </div>
+        </div>
+        <div class="modal-foot">
+            <button class="trash-btn" onclick="closeSettings()">关闭</button>
+        </div>
+    </div>
+</div>

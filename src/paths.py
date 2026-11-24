@@ -57,7 +57,6 @@ CHROMA_DIR = os.path.join(DATA_DIR, "chroma_db")
 # 光隔离 AGENT_DB_PATH 是不够的，跑一批任务会往真实回收站里塞几百份备份
 # （agent-code 自己就踩过这个坑，往 data/.trash 留了 122 条测试残留）。
 TRASH_DIR = os.environ.get("AGENT_TRASH_DIR") or os.path.join(DATA_DIR, ".trash")
-BACKUP_DIR = os.path.join(DATA_DIR, ".backup")
 WEBVIEW_DATA_DIR = os.path.join(DATA_DIR, ".webview_data")
 
 # 前端资源：<root>/web/{templates,static,icon.png}
@@ -76,11 +75,6 @@ def get_user_home() -> str:
 # 只放行用户主目录；若把附件放在别处（项目不在 home 下时就是这种情况），
 # Agent 的 read_file / edit_file 会读不到它，「让它改这本文档」就直接失效。
 UPLOAD_DIR = os.path.join(get_user_home(), ".agent-code", "uploads")
-
-
-def get_default_workspace() -> str:
-    # 工作区 = 用户 home（与 System Prompt 一致）
-    return get_user_home()
 
 
 def get_forbidden_dirs():

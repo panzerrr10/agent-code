@@ -1,0 +1,26 @@
+<div class="trash-overlay" id="trashOverlay" style="display: none;" onclick="if(event.target===this) closeTrash()">
+    <div class="trash-panel">
+        <div class="trash-head">
+            <span>🗑️ 回收站 <span class="trash-sub" id="trashSub"></span></span>
+            <button class="icon-btn" onclick="closeTrash()" title="关闭">✕</button>
+        </div>
+        <div class="trash-hint">
+            每次覆盖写入 / 编辑 / 批量编辑 / 删除前都会在这里留一份备份。
+            点「恢复」会写回它原来的路径；若目标已存在，会先把现状也备份一份，所以恢复本身也能撤回。
+        </div>
+        <div class="trash-toolbar">
+            <label class="trash-pickall">
+                <input type="checkbox" id="trashSelectAll" onchange="toggleTrashSelectAll(this.checked)">
+                <span>全选</span>
+            </label>
+            <span class="trash-selinfo" id="trashSelInfo">未选择</span>
+            <button class="trash-btn" id="trashBulkRestoreBtn" onclick="restoreSelectedTrash()" disabled>
+                ↩ 恢复选中
+            </button>
+            <button class="trash-btn danger" id="trashBulkDelBtn" onclick="purgeSelectedTrash()" disabled>
+                🗑 删除选中
+            </button>
+        </div>
+        <div class="trash-list" id="trashList"></div>
+    </div>
+</div>

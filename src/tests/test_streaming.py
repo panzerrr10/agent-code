@@ -1,6 +1,8 @@
 import sys
 import time
 
+from tests.fakes import patch_agent
+
 sys.path.insert(0, "src")
 
 import agent  # noqa: E402
@@ -25,8 +27,7 @@ def _run(monkeypatch, chunks, *, delay=0.0):
                     time.sleep(delay)
                 yield c
         return gen()
-    monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
-    monkeypatch.setattr(agent, "call_llm_with_retry", fake)
+    patch_agent(monkeypatch, fake)
     monkeypatch.setattr(agent, "get_provider", lambda pid=None: {
         "id": "t", "name": "t", "base_url": "https://x/v1", "api_key": "k",
         "models": ["m"], "default_model": "m", "supports_embedding": False,
@@ -48,8 +49,7 @@ def test_multi_chunk_stream_is_not_duplicated(monkeypatch):
                 time.sleep(a.STREAM_FLUSH_SEC * 1.2)   # 保证跨过节流阈值
                 yield _Chunk(f"片段{i} ")
         return gen()
-    monkeypatch.setattr(agent, "get_llm_client", lambda *x, **k: object())
-    monkeypatch.setattr(agent, "call_llm_with_retry", fake)
+    patch_agent(monkeypatch, fake)
     monkeypatch.setattr(agent, "get_provider", lambda pid=None: {
         "id": "t", "name": "t", "base_url": "https://x/v1", "api_key": "k",
         "models": ["m"], "default_model": "m", "supports_embedding": False,
@@ -68,8 +68,7 @@ def test_slow_stream_produces_multiple_text_events(monkeypatch):
                 time.sleep(agent.STREAM_FLUSH_SEC * 1.5)
                 yield _Chunk(f"x{i}")
         return gen()
-    monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
-    monkeypatch.setattr(agent, "call_llm_with_retry", fake)
+    patch_agent(monkeypatch, fake)
     monkeypatch.setattr(agent, "get_provider", lambda pid=None: {
         "id": "t", "name": "t", "base_url": "https://x/v1", "api_key": "k",
         "models": ["m"], "default_model": "m", "supports_embedding": False,

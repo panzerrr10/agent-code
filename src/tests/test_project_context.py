@@ -1,3 +1,4 @@
+
 """项目约定（AGENTS.md）的测试。
 
 要点：
@@ -11,6 +12,8 @@ import os
 import sys
 
 import pytest
+
+from tests.fakes import patch_agent
 
 sys.path.insert(0, "src")
 
@@ -281,8 +284,7 @@ def test_agent_injects_agents_md_system_message(client, wsdir, monkeypatch):
 
         return gen()
 
-    monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
-    monkeypatch.setattr(agent, "call_llm_with_retry", fake_llm)
+    patch_agent(monkeypatch, fake_llm)
 
     events = list(agent.run_agent_stream("你好", session_id=sid, user_api_key="k"))
 
@@ -328,8 +330,7 @@ def test_no_agents_md_means_no_event_and_no_extra_message(client, wsdir, monkeyp
             yield _Chunk(_Delta(content="好的"))
         return gen()
 
-    monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
-    monkeypatch.setattr(agent, "call_llm_with_retry", fake_llm)
+    patch_agent(monkeypatch, fake_llm)
 
     events = list(agent.run_agent_stream("你好", session_id=sess["id"], user_api_key="k"))
     assert not [e for e in events if e.get("type") == "project_context"]

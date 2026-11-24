@@ -1,3 +1,4 @@
+
 """上下文压缩的测试。
 
 最要紧的一条：**压缩后 tool_call / tool 消息必须仍然配对**。
@@ -8,6 +9,8 @@
 import json
 import sys
 import types
+
+from tests.fakes import patch_agent
 
 sys.path.insert(0, "src")
 
@@ -296,9 +299,8 @@ def test_agent_emits_context_stats_when_over_budget(client, monkeypatch):
     sid = client.post("/sessions", json={}).get_json()["id"]
     monkeypatch.setattr(agent, "CONTEXT_BUDGET_TOKENS", 500)
     monkeypatch.setattr(agent, "CONTEXT_KEEP_RECENT_TOOL_RESULTS", 1)
-    monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
     # 第一步读个大文件，第二步收尾
-    monkeypatch.setattr(agent, "call_llm_with_retry", _stream(
+    patch_agent(monkeypatch, _stream(
         _tool_call(0, "list_dir", {"path": "."}),
         _final("好的"),
     ))
@@ -313,7 +315,6 @@ def test_agent_emits_context_stats_when_over_budget(client, monkeypatch):
 
 def test_agent_no_context_stats_when_under_budget(client, monkeypatch):
     sid = client.post("/sessions", json={}).get_json()["id"]
-    monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
-    monkeypatch.setattr(agent, "call_llm_with_retry", _stream(_final("直接回答")))
+    patch_agent(monkeypatch, _stream(_final("直接回答")))
     events = list(agent.run_agent_stream("你好", session_id=sid, user_api_key="k"))
     assert not [e for e in events if e.get("type") == "context_stats"], "没超预算不该报压缩"

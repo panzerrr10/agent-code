@@ -1,0 +1,675 @@
+/* ===== 模型选择器 ===== */
+.model-picker {
+    position: relative;
+    display: inline-block;
+}
+
+#modelPickerBtn {
+    padding: 11px 14px;
+    background: var(--bg-input, #fff);
+    border: 2px solid var(--border-input, #e5e7eb);
+    border-radius: 10px;
+    font-size: 13px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    margin-bottom: 2px;
+    /* ← 和输入框底部对齐 */
+    font-family: inherit;
+    /* 批次 4：模型名过长时截断显示 */
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#modelPickerBtn #modelPickerLabel {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 150px;
+}
+
+#modelPickerBtn:hover {
+    border-color: #667eea;
+}
+
+#modelPickerBtn .arrow {
+    font-size: 10px;
+    color: #999;
+    margin-left: 2px;
+}
+
+.model-picker-dropdown {
+    display: none;
+    position: absolute;
+    /* 默认向下弹；下方空间不够时由 JS 加 .drop-up 翻上去
+       （方向不再按控件写死——之前就是那样漏掉了多 Agent 的角色选择器） */
+    top: calc(100% + 6px);
+    bottom: auto;
+    left: 0;
+    min-width: 280px;
+    max-height: 400px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #e3e6ea;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    z-index: 100;
+    padding: 6px 0;
+}
+
+.model-picker-dropdown.show {
+    display: block;
+}
+
+/* 下方空间不够时翻到上方（由 positionDropdown() 决定） */
+.model-picker-dropdown.drop-up,
+.role-picker-dropdown.drop-up {
+    top: auto;
+    bottom: calc(100% + 6px);
+}
+
+.provider-group {
+    padding: 4px 0;
+    border-bottom: 1px solid #f1f3f4;
+}
+
+.provider-group:last-child {
+    border-bottom: none;
+}
+
+.provider-header {
+    padding: 6px 14px;
+    font-size: 11px;
+    color: #999;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+}
+
+.provider-header .locked {
+    color: #f59e0b;
+    font-size: 10px;
+    font-weight: normal;
+}
+
+.model-item {
+    padding: 8px 14px 8px 28px;
+    font-size: 13px;
+    color: #333;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background 0.1s;
+}
+
+.model-item:hover {
+    background: #f1f5ff;
+}
+
+.model-item.active {
+    background: #eef1ff;
+    color: #4a63e7;
+    font-weight: 500;
+}
+
+.model-item.disabled {
+    color: #bbb;
+    cursor: not-allowed;
+}
+
+.model-item.disabled:hover {
+    background: transparent;
+}
+
+.model-item .default-tag {
+    font-size: 10px;
+    color: #999;
+    background: #f3f4f6;
+    padding: 1px 6px;
+    border-radius: 4px;
+    margin-left: 8px;
+}
+
+/* ===== 多 Agent 三角色选择器 ===== */
+.multi-agent-pickers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    width: 100%;
+    padding: 0 0 8px;
+    border-bottom: 1px solid #eef0f3;
+    margin-bottom: 8px;
+}
+
+.role-picker {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.role-label {
+    font-size: 12px;
+    color: #6b7280;
+    white-space: nowrap;
+}
+
+.role-picker-btn {
+    padding: 6px 10px;
+    background: var(--bg-input, #fff);
+    border: 1.5px solid var(--border-input, #e5e7eb);
+    border-radius: 8px;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+    font-family: inherit;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.role-picker-btn:hover {
+    border-color: #667eea;
+}
+
+.role-picker-btn .arrow {
+    font-size: 9px;
+    color: #999;
+}
+
+.role-picker-dropdown {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    bottom: auto;
+    left: 0;
+    min-width: 240px;
+    max-height: 360px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #e3e6ea;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    z-index: 100;
+    padding: 6px 0;
+}
+
+.role-picker-dropdown.show {
+    display: block;
+}
+
+/* ===== 图片上传（多模态）===== */
+#imgBtn {
+    padding: 11px 14px;
+    background: var(--bg-input);
+    border: 2px solid var(--border-input);
+    border-radius: 10px;
+    font-size: 16px;
+    cursor: pointer;
+    margin-bottom: 2px;
+    /* ← 和输入框底部对齐 */
+}
+
+#imgBtn:hover {
+    border-color: #667eea;
+}
+
+.image-preview {
+    display: none;
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.img-thumb {
+    position: relative;
+    width: 64px;
+    height: 64px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border-main);
+    background: var(--bg-input);
+}
+
+.img-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.img-thumb-del {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 18px;
+    height: 18px;
+    line-height: 16px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+/* ===== 图片放大 Lightbox ===== */
+#imgLightbox {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.85);
+    z-index: 9999;
+    justify-content: center;
+    align-items: center;
+    cursor: zoom-out;
+}
+
+#imgLightbox.show {
+    display: flex;
+}
+
+#imgLightbox img {
+    max-width: 92vw;
+    max-height: 92vh;
+    border-radius: 8px;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
+    object-fit: contain;
+}
+
+/* 让缩略图和气泡图片可点击 */
+.img-thumb img,
+.bubble-img {
+    cursor: zoom-in;
+}
+
+.bubble-images {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.bubble-img {
+    max-width: 180px;
+    max-height: 180px;
+    border-radius: 8px;
+    display: block;
+}
+
+#task {
+    flex: 1;
+    padding: 11px 15px;
+    background: var(--bg-input);
+    border: 2px solid var(--border-input);
+    border-radius: 10px;
+    font-size: 14px;
+    font-family: inherit;
+    color: var(--text-main);
+    resize: vertical;
+    /* ← 允许垂直拖动 */
+    outline: none;
+    min-height: 90px;
+    /* ← 初始 3 行高 */
+    max-height: 300px;
+    /* ← 最大 300px */
+    line-height: 1.5;
+    /* ← 行高 */
+}
+
+#task:focus {
+    border-color: #667eea;
+}
+
+#runBtn {
+    padding: 11px 24px;
+    background: var(--accent-gradient);
+    color: var(--text-user);
+    border: none;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 2px;
+    /* ← 和输入框底部对齐 */
+}
+
+#runBtn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+#stopBtn {
+    padding: 11px 16px;
+    background: #ef4444;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 2px;
+}
+
+#stopBtn:hover {
+    background: #dc2626;
+}
+
+#stopBtn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* 回收站面板 */
+.trash-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, .45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+}
+
+.trash-panel {
+    width: min(780px, 92vw);
+    max-height: 82vh;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, .28);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.trash-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid #eef0f3;
+    font-weight: 600;
+}
+
+.trash-sub {
+    font-weight: 400;
+    font-size: 12px;
+    color: #6b7280;
+    margin-left: 6px;
+}
+
+.trash-hint {
+    padding: 10px 18px;
+    font-size: 12px;
+    color: #6b7280;
+    background: #f9fafb;
+    border-bottom: 1px solid #eef0f3;
+    line-height: 1.6;
+}
+
+.trash-list {
+    overflow: auto;
+    padding: 6px 12px 14px;
+}
+
+.trash-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 8px;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+.trash-item:last-child {
+    border-bottom: none;
+}
+
+.trash-meta {
+    flex: 1;
+    min-width: 0;
+}
+
+.trash-path {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: #111827;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.trash-info {
+    font-size: 11px;
+    color: #9ca3af;
+    margin-top: 2px;
+}
+
+.trash-kind {
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: #eef2ff;
+    color: #4338ca;
+    white-space: nowrap;
+}
+
+.trash-btn {
+    font-size: 12px;
+    padding: 5px 10px;
+    border-radius: 6px;
+    border: 1px solid #e5e7eb;
+    background: #fff;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.trash-btn:hover {
+    background: #f9fafb;
+}
+
+.trash-btn.restore {
+    background: #10b981;
+    color: #fff;
+    border-color: #10b981;
+}
+
+.trash-btn.restore:hover {
+    background: #059669;
+}
+
+.trash-btn:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+}
+
+.trash-empty {
+    padding: 28px;
+    text-align: center;
+    color: #9ca3af;
+    font-size: 13px;
+}
+
+/* ===== 工作区选择器 ===== */
+.ws-selector {
+    position: relative;
+    padding: 10px 10px 6px;
+    flex-shrink: 0;
+}
+
+.ws-current {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: left;
+}
+
+.ws-current:hover {
+    border-color: #c7d2fe;
+    background: #f8faff;
+}
+
+.ws-badge {
+    font-size: 15px;
+    flex-shrink: 0;
+}
+
+.ws-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.ws-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #111827;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ws-path {
+    font-size: 10px;
+    color: #9ca3af;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ws-caret {
+    font-size: 11px;
+    color: #9ca3af;
+    flex-shrink: 0;
+}
+
+.ws-menu {
+    position: absolute;
+    left: 10px;
+    /* 菜单要比侧边栏宽，否则工作区路径会被截成 /home/pz/Py… 没法分辨 */
+    width: 320px;
+    top: calc(100% - 4px);
+    z-index: 60;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .16);
+    padding: 6px;
+    max-height: 46vh;
+    overflow: auto;
+}
+
+.ws-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 8px;
+    border-radius: 7px;
+    cursor: pointer;
+}
+
+.ws-item:hover {
+    background: #f3f4f6;
+}
+
+.ws-item.active {
+    background: #eef2ff;
+}
+
+.ws-item-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.ws-item-name {
+    font-size: 12.5px;
+    color: #111827;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ws-item-path {
+    font-size: 10px;
+    color: #9ca3af;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ws-item-count {
+    font-size: 10px;
+    color: #6b7280;
+    background: #f3f4f6;
+    border-radius: 999px;
+    padding: 1px 6px;
+    flex-shrink: 0;
+}
+
+.ws-item-actions {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.ws-item-actions button {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 3px 4px;
+    border-radius: 5px;
+    opacity: .55;
+}
+
+.ws-item-actions button:hover {
+    opacity: 1;
+    background: #e5e7eb;
+}
+
+.ws-bad {
+    color: #b91c1c;
+}
+
+.ws-menu-sep {
+    height: 1px;
+    background: #eef0f3;
+    margin: 5px 2px;
+}
+
+.ws-menu-new {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px;
+    border-radius: 7px;
+    cursor: pointer;
+    font-size: 12.5px;
+    color: #4f46e5;
+    font-weight: 600;
+}
+
+.ws-menu-new:hover {
+    background: #eef2ff;
+}
+

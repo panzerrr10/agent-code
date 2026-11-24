@@ -11,6 +11,7 @@ import pytest
 import agent
 import app as app_module
 import runtime
+from tests.fakes import patch_agent
 
 
 @pytest.fixture(autouse=True)
@@ -133,7 +134,7 @@ def test_agent_stops_mid_stream_when_cancelled(monkeypatch):
         runtime.request_cancel("c2")  # 模拟用户此刻点了「停止」
         yield _FakeChunk("这段不应被处理")
 
-    monkeypatch.setattr(agent, "call_llm_with_retry", fake_stream)
+    patch_agent(monkeypatch, fake_stream)
 
     events = list(agent.run_agent_stream("任务", session_id="c2", user_api_key="k"))
     types = [e.get("type") for e in events]
@@ -157,7 +158,7 @@ def test_stale_cancel_flag_does_not_abort_new_run(monkeypatch):
     def fake_stream(*args, **kwargs):
         yield _FakeChunk("正常运行的结果")
 
-    monkeypatch.setattr(agent, "call_llm_with_retry", fake_stream)
+    patch_agent(monkeypatch, fake_stream)
 
     events = list(agent.run_agent_stream("任务", session_id="c3", user_api_key="k"))
     types = [e.get("type") for e in events]

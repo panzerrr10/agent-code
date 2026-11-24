@@ -18,6 +18,7 @@ import pytest
 import agent
 import runtime
 import trash
+from tests.fakes import patch_agent
 
 HOME = os.path.expanduser("~")
 
@@ -26,7 +27,6 @@ HOME = os.path.expanduser("~")
 def project(monkeypatch):
     d = tempfile.mkdtemp(prefix=".agentcode-confirm-", dir=HOME)
     monkeypatch.setattr(trash, "TRASH_DIR", os.path.join(d, ".trash"))
-    monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
     runtime.reset_all()
     runtime.set_session_id("confirm-sess")
     runtime.set_project_root(d)
@@ -97,10 +97,7 @@ def test_write_file_waits_for_confirm_then_resumes(project, monkeypatch):
         f.write("OLD")
 
     # ---- 第 1 轮：模型要写文件，但必须停下等确认 ----
-    monkeypatch.setattr(
-        agent,
-        "call_llm_with_retry",
-        _llm_returning([_tool_call_chunk("write_file", {"path": target, "content": "NEW"})]),
+    patch_agent(monkeypatch, _llm_returning([_tool_call_chunk("write_file", {"path": target, "content": "NEW"})]),
     )
 
     events = list(
@@ -127,8 +124,7 @@ def test_write_file_waits_for_confirm_then_resumes(project, monkeypatch):
     assert st["messages"], "pending_state 里必须带上完整 messages 才能续跑"
 
     # ---- 第 2 轮：用户点 ✓ → 续跑，工具真正执行 ----
-    monkeypatch.setattr(
-        agent, "call_llm_with_retry", _llm_returning([_text_chunk("已经改好了")])
+    patch_agent(monkeypatch, _llm_returning([_text_chunk("已经改好了")])
     )
 
     events2 = list(
@@ -160,10 +156,7 @@ def test_delete_file_waits_for_confirm(project, monkeypatch):
     with open(target, "w", encoding="utf-8") as f:
         f.write("x")
 
-    monkeypatch.setattr(
-        agent,
-        "call_llm_with_retry",
-        _llm_returning([_tool_call_chunk("delete_file", {"path": target})]),
+    patch_agent(monkeypatch, _llm_returning([_tool_call_chunk("delete_file", {"path": target})]),
     )
     events = list(
         agent.run_agent_stream("删掉它", session_id="confirm-sess", user_api_key="k")
@@ -177,10 +170,7 @@ def test_delete_file_waits_for_confirm(project, monkeypatch):
 
 def test_unsafe_command_waits_for_confirm_but_readonly_runs(project, monkeypatch):
     """只读命令免确认直接跑；写类命令必须等确认。"""
-    monkeypatch.setattr(
-        agent,
-        "call_llm_with_retry",
-        _llm_returning([_tool_call_chunk("run_command", {"cmd": "mkdir hacked"})]),
+    patch_agent(monkeypatch, _llm_returning([_tool_call_chunk("run_command", {"cmd": "mkdir hacked"})]),
     )
     events = list(
         agent.run_agent_stream("建个目录", session_id="confirm-sess", user_api_key="k")
@@ -196,10 +186,7 @@ def test_pending_state_is_per_session(project, monkeypatch):
     with open(target, "w", encoding="utf-8") as f:
         f.write("OLD")
 
-    monkeypatch.setattr(
-        agent,
-        "call_llm_with_retry",
-        _llm_returning([_tool_call_chunk("write_file", {"path": target, "content": "X"})]),
+    patch_agent(monkeypatch, _llm_returning([_tool_call_chunk("write_file", {"path": target, "content": "X"})]),
     )
     list(agent.run_agent_stream("改文件", session_id="sessA", user_api_key="k"))
 

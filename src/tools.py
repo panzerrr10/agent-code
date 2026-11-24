@@ -2112,18 +2112,6 @@ CORE_TOOLS = [
     "run_tests",
 ]
 
-EXTENDED_TOOLS = [
-    "get_file_info",
-    "delete_file",
-    "run_command",
-    "search_knowledge",
-    "save_memory",
-    "list_memories",
-    "delete_memory",
-    "read_file_range",
-]
-
-
 # ===== MCP 插件工具（外部 server 提供）=====
 # 注入是「按需」的：默认只有在任务里出现该 server 的名字/工具名/自定义关键词时才注入。
 # 原因很实际 —— schema 是**每一步**都重发的，常驻注入等于按步数反复付钱。
@@ -2296,16 +2284,6 @@ TOOL_FUNCTIONS = {
     "git_rollback": git_rollback,
     "run_tests": run_tests,
 }
-# 导出给 agent.py 用
-__all__ = [
-    # ... 原有 ...
-    "is_safe_command",
-]
-
-
-# 供 agent.py 使用：判断一个工具是不是内置的（用于 MCP 分支前的短路）
-def is_builtin_tool(name: str) -> bool:
-    return name in TOOL_FUNCTIONS
 
 
 def execute_tool(name: str, args: dict) -> str:

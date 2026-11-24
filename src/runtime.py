@@ -79,16 +79,8 @@ def set_api_key(key: str):
     _api_key_var.set(key)
 
 
-def get_api_key():
-    return _api_key_var.get()
-
-
 def set_base_url(url: str):
     _base_url_var.set(url)
-
-
-def get_base_url():
-    return _base_url_var.get()
 
 
 # ===== RAG 专用配置（每请求隔离）=====
@@ -100,16 +92,8 @@ def set_rag_api_key(key: str):
     _rag_api_key_var.set(key)
 
 
-def get_rag_api_key():
-    return _rag_api_key_var.get()
-
-
 def set_rag_base_url(url: str):
     _rag_base_url_var.set(url)
-
-
-def get_rag_base_url():
-    return _rag_base_url_var.get()
 
 
 def get_effective_rag_api_key():

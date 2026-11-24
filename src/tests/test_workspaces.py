@@ -7,7 +7,6 @@
 
 import os
 import shutil
-import sqlite3
 import tempfile
 
 import pytest
@@ -30,12 +29,17 @@ def work(monkeypatch):
 
 
 def _wipe_workspaces():
-    conn = sqlite3.connect(db.DB_PATH)
-    conn.execute("DELETE FROM sessions")
-    conn.execute("DELETE FROM messages")
-    conn.execute("DELETE FROM workspaces")
-    conn.commit()
-    conn.close()
+    """清空三张表（走 ORM，SQLite / MySQL 都适用）。"""
+    from sqlalchemy import delete
+
+    from persistence import get_session
+    from persistence.models import Message, Workspace
+    from persistence.models import Session as SessionModel
+
+    with get_session() as s:
+        s.execute(delete(Message))
+        s.execute(delete(SessionModel))
+        s.execute(delete(Workspace))
 
 
 # ============ 默认工作区 ============
@@ -192,42 +196,6 @@ def test_workspace_session_count(work):
 # ============ 迁移：老库升级 ============
 
 
-def test_migration_from_legacy_db(monkeypatch, tmp_path):
-    """模拟没有 workspaces 表、sessions 也没有 workspace_id 的老库。"""
-    legacy = tmp_path / "legacy.db"
-    conn = sqlite3.connect(legacy)
-    conn.execute(
-        "CREATE TABLE sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL,"
-        " created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
-    )
-    conn.execute(
-        "CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER NOT NULL,"
-        " role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL)"
-    )
-    conn.execute(
-        "INSERT INTO sessions (title, created_at, updated_at) VALUES ('老会话1','2026-01-01','2026-01-01')"
-    )
-    conn.execute(
-        "INSERT INTO sessions (title, created_at, updated_at) VALUES ('老会话2','2026-01-02','2026-01-02')"
-    )
-    conn.commit()
-    conn.close()
-
-    monkeypatch.setattr(db, "DB_PATH", str(legacy))
-    monkeypatch.setenv("AGENT_DEFAULT_WORKSPACE", str(tmp_path / "ws"))
-    os.makedirs(tmp_path / "ws", exist_ok=True)
-
-    db.init_db()  # 迁移
-
-    ws = db.get_all_workspaces()
-    assert len(ws) == 1, "老库应自动补出一个工作区"
-    sessions = db.get_all_sessions()
-    assert len(sessions) == 2
-    assert all(s["workspace_id"] == ws[0]["id"] for s in sessions), (
-        "老会话必须被迁进工作区，否则它们在按工作区过滤的列表里会「消失」"
-    )
-
-
 def test_init_db_is_idempotent(work):
     _wipe_workspaces()
     for _ in range(3):
@@ -239,7 +207,6 @@ def test_init_db_is_idempotent(work):
 
 
 def test_api_workspace_flow(client, work, monkeypatch):
-    monkeypatch.setattr(db, "DB_PATH", db.DB_PATH)
     monkeypatch.setenv("AGENT_DEFAULT_WORKSPACE", work)
 
     r = client.get("/workspaces").get_json()

@@ -1,3 +1,4 @@
+
 """「第 N 轮改动」的测试。
 
 这个功能的正确性有三个层面，全部要测：
@@ -17,6 +18,8 @@ import sys
 import tempfile
 
 import pytest
+
+from tests.fakes import patch_agent
 
 sys.path.insert(0, "src")
 
@@ -239,8 +242,7 @@ def test_resume_keeps_same_round(monkeypatch, session, proj):
         seen["messages"] = k.get("messages") or []
         return iter([_K(_D(c="好"))])
 
-    monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
-    monkeypatch.setattr(agent, "call_llm_with_retry", fake_llm)
+    patch_agent(monkeypatch, fake_llm)
 
     list(agent.run_agent_stream("改个文件", session_id=session, user_api_key="k"))
     state = runtime.get_pending_state(session)

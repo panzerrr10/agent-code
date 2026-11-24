@@ -1,7 +1,17 @@
 # 核心
 flask>=3.0.0
-openai>=1.50.0
 python-dotenv>=1.0.0
+
+# LangChain 技术栈（模型调用 / 工具定义 / 图编排）
+langchain-core>=1.0.0
+langchain-openai>=1.0.0
+langgraph>=1.0.0
+
+# 持久化：MySQL（会话 / 消息 / 运行时状态全部落库，不再用本地 SQLite 文件）
+SQLAlchemy>=2.0.0
+PyMySQL>=1.1.0
+cryptography>=42.0.0        # MySQL 8 的 caching_sha2_password 需要
+alembic>=1.13.0
 
 # RAG
 chromadb>=0.5.0

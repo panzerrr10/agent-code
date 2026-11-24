@@ -1,0 +1,199 @@
+<div class="app">
+    <div class="header">
+        <div>
+            <h1>🤖 AI Agent</h1>
+            <div class="sub">读、写、执行、规划、RAG、记忆 · 多 Agent 协作</div>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+            <div class="mode-switch">
+                <button class="mode-btn active" data-mode="single" onclick="setMode('single')">单 Agent</button>
+                <button class="mode-btn" data-mode="multi" onclick="setMode('multi')">多 Agent</button>
+            </div>
+            <button class="icon-btn" id="filePanelBtn" onclick="toggleFilePanel()"
+                title="显示/隐藏文件面板 (Ctrl+B)"
+                aria-label="显示或隐藏文件面板">📄</button>
+            <button class="icon-btn" id="themeBtn" onclick="toggleTheme()" title="切换主题"
+                    aria-label="切换深色/浅色主题">🌙</button>
+            <div class="dropdown">
+                <button class="icon-btn" onclick="toggleExportMenu(event)" title="导出"
+                        aria-label="导出当前会话">📥</button>
+                <div class="dropdown-menu" id="exportMenu" style="display:none;">
+                    <a onclick="exportAs('md')">📄 Markdown (.md)</a>
+                    <a onclick="exportAs('json')">📋 JSON (.json)</a>
+                    <a onclick="exportAs('pdf')">📕 PDF (.pdf)</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-body">
+        <div class="sidebar">
+            <!-- 工作区选择器：会话都挂在某个工作区之下，工作区决定工作目录 -->
+            <div class="ws-selector">
+                <button class="ws-current" id="wsCurrentBtn" onclick="toggleWsMenu(event)"
+                    title="切换 / 新建工作区">
+                    <span class="ws-badge">📁</span>
+                    <span class="ws-text">
+                        <span class="ws-name" id="wsCurrentName">加载中…</span>
+                        <span class="ws-path" id="wsCurrentPath" title=""></span>
+                    </span>
+                    <span class="ws-caret">▾</span>
+                </button>
+                <div class="ws-menu" id="wsMenu" style="display: none;"></div>
+            </div>
+
+            <button class="new-chat-btn" onclick="createNewSession()" id="newChatBtn">+ 新对话</button>
+            <div class="session-search" style="display: none;">
+                <input type="search" id="sessionSearch" placeholder="搜索会话…"
+                       aria-label="搜索会话" oninput="onSessionSearch(this.value)">
+            </div>
+            <div class="session-list" id="sessionList"></div>
+
+            <!-- 回收站入口 -->
+            <div class="doc-section">
+                <div class="doc-header">
+                    <span>🗑️ 回收站</span>
+                    <button class="icon-btn-mini" onclick="openTrash()" title="查看备份并一键恢复">打开</button>
+                </div>
+                <div class="doc-list" id="trashSummary" style="font-size:12px;color:#6b7280;padding:2px 6px;">
+                    点击「打开」查看并恢复
+                </div>
+            </div>
+
+            <!-- 设置：整个界面左下角 -->
+            <button class="settings-btn" id="settingsBtn" onclick="openSettings()" title="设置">
+                <span class="settings-icon">⚙️</span>
+                <span>设置</span>
+            </button>
+        </div>
+        <!-- 搜索框 -->
+        <div class="search-box" id="searchBox" style="display:none;">
+            <input type="text" id="searchInput" placeholder="搜索对话（Enter 下一个，Esc 关闭）" autocomplete="off">
+            <span class="search-count" id="searchCount"></span>
+            <button class="search-close" onclick="closeSearch()">✕</button>
+        </div>
+
+        <!-- 项目树栏 -->
+        <div class="project-tree-panel" id="projectTreePanel">
+            <div class="project-tree-header">
+                <span class="pt-title">📁 项目树</span>
+                <div style="display: flex; gap: 4px;">
+                    <button onclick="loadProjectTree()" class="icon-btn-mini" title="刷新">🔄</button>
+                    <button onclick="toggleProjectTree()" class="icon-btn-mini" id="ptToggleBtn"
+                        title="折叠/展开">◀</button>
+                </div>
+            </div>
+            <div class="project-tree" id="projectTree"></div>
+        </div>
+
+        <div class="chat-panel">
+            <!-- 跳到最新：长任务里往上翻之后回不到底部（旧代码还在无条件把你往下拽） -->
+            <button id="jumpLatest" class="jump-latest" style="display: none;"
+                    onclick="jumpToLatest()" title="跳到最新" aria-label="跳到最新消息">
+                <span class="jl-arrow">↓</span><span class="jl-text"></span>
+            </button>
+            <!-- 任务计划面板 -->
+            <div class="plan-panel" id="planPanel" style="display: none;">
+                <div class="plan-header">
+                    <span>📋 任务计划</span>
+                    <button class="plan-toggle" onclick="togglePlan()">收起</button>
+                </div>
+                <div class="plan-list" id="planList"></div>
+            </div>
+            <div class="chat" id="chat">
+                <div class="msg assistant">
+                    <div class="bubble-wrap">
+                        <div class="bubble">👋 你好！我可以帮你分析代码。试试说：<br>「读一下 tools.py，总结它有哪些函数」<br>「列出项目根目录的所有文件」<br>💡
+                            提示：可以让我读取、修改任何项目代码</div>
+                    </div>
+                </div>
+            </div>
+            <!-- 原来这里有一条「📁 工作区：路径 + 新建 + 切换」的横栏，
+                 现已移除：工作区的切换与新建都收在侧边栏顶部的选择器里，
+                 同一功能放两处反而让人分不清哪个才是当前工作区。 -->
+            <div class="input-area">
+                <div class="attach-strip" id="attachStrip" style="display: none;"></div>
+                <div class="image-preview" id="imagePreview"></div>
+                <!-- 回形针：文本文档 + 图片都能传（图片走多模态，文档抽正文落盘给 Agent） -->
+                <input type="file" id="attachInput" multiple style="display: none;"
+                    accept="image/*,.txt,.md,.markdown,.rst,.log,.csv,.tsv,.json,.yaml,.yml,.toml,.ini,.cfg,.conf,.xml,.html,.htm,.css,.scss,.js,.mjs,.cjs,.ts,.tsx,.jsx,.py,.rb,.go,.rs,.java,.kt,.c,.h,.cpp,.hpp,.cs,.php,.sh,.bash,.zsh,.sql,.pdf,.docx"
+                    onchange="handleAttachFiles(this.files)">
+                <div class="composer" id="composer">
+                    <textarea id="task"
+                        placeholder="描述你的任务…  Enter 发送 · Shift+Enter 换行 · 可直接拖入文件"
+                        aria-label="任务输入框"></textarea>
+                    <div class="composer-bar">
+                        <!-- 左下角：会话权限等级 -->
+                        <div class="perm-switch" id="permSwitch" title="权限等级（按会话生效）">
+                            <button type="button" class="perm-btn" data-level="1"
+                                onclick="setPermission(1)">🔒 只读</button>
+                            <button type="button" class="perm-btn" data-level="2"
+                                onclick="setPermission(2)">✋ 确认</button>
+                            <button type="button" class="perm-btn" data-level="3"
+                                onclick="setPermission(3)">⚡ 完全</button>
+                        </div>
+                        <div class="model-picker compact" id="modelPicker">
+                    <button type="button" id="modelPickerBtn" onclick="toggleModelPicker(event)">
+                        <span id="modelPickerIcon">🐳</span>
+                        <span id="modelPickerLabel">DeepSeek · deepseek-chat</span>
+                        <span class="arrow">▾</span>
+                    </button>
+                    <div class="model-picker-dropdown" id="modelPickerDropdown"></div>
+                </div>
+                        <!-- 右下角：加附件 -->
+                        <button type="button" id="attachBtn" class="composer-attach"
+                            onclick="document.getElementById('attachInput').click()"
+                            title="添加附件：文本文档或图片（也可在输入框内 Ctrl+V 粘贴图片）">📎</button>
+                    </div>
+                </div>
+                <button id="runBtn" onclick="runTask()">执行</button>
+                <button id="stopBtn" onclick="cancelRun()"
+                    title="停止当前任务（协作式取消，会在下一个检查点停下）"
+                    style="display: none;">⏹ 停止</button>
+            </div>
+            <!-- 会话级用量：总 token 消耗 + 缓存命中率。
+                 刻意放在输入区**下方**（不是框里）：输入区底 padding 相应收窄，
+                 视觉上就是输入框整体上移了一点，底下留出一条细窄的信息行。 -->
+            <div class="session-stats" id="sessionStats"
+                 title="本会话累计用量（跨多轮任务累加；缓存命中率 = 命中 tokens / 输入 tokens）">
+                <span id="sessionStatsText">本会话：暂无用量</span>
+            </div>
+        </div>
+
+        <!-- 右侧文件面板：查看 / 编辑工作区里的文件 -->
+        <div class="file-resizer" id="fileResizer" title="拖动调整宽度" style="display: none;"></div>
+        <div class="file-panel" id="filePanel" style="display: none;">
+            <div class="fp-tabs" id="fpTabs"></div>
+            <div class="file-panel-head">
+                <span class="fp-name" id="fpName">未打开文件</span>
+                <div class="fp-head-actions">
+                    <button class="icon-btn-mini" id="fpFullBtn" onclick="toggleFileFullscreen()"
+                        title="全屏显示（Esc 退出）">⛶</button>
+                    <button class="icon-btn-mini" onclick="closeFilePanel()"
+                        title="关闭（Ctrl+B）">✕</button>
+                </div>
+            </div>
+            <div class="fp-meta">
+                <span class="fp-path" id="fpPath" title=""></span>
+                <span class="fp-dirty" id="fpDirty" style="display: none;">● 未保存</span>
+            </div>
+            <div class="fp-editor" id="fpEditor"></div>
+            <!-- 只读 diff 视图（点「改动过的文件」时用，与上面的编辑器互斥显示） -->
+            <div class="fp-diff" id="fpDiff" style="display: none;"></div>
+            <div class="fp-notice" id="fpNotice" style="display: none;"></div>
+            <div class="fp-foot">
+                <button class="fp-btn primary" id="fpSaveBtn" onclick="saveFile()" disabled>💾 保存</button>
+                <button class="fp-btn" id="fpUndoBtn" onclick="undoFile()" disabled
+                    title="撤销（Ctrl+Z）">↶ 撤销</button>
+                <button class="fp-btn" id="fpRedoBtn" onclick="redoFile()" disabled
+                    title="重做（Ctrl+Shift+Z）">↷ 重做</button>
+                <button class="fp-btn" id="fpAskBtn" onclick="askAgentAboutFile()"
+                    title="把「读取该文件」填进对话输入框，交给 Agent 处理">🤖 让 Agent 处理</button>
+                <button class="fp-btn" id="fpDownloadBtn" onclick="downloadCurrentFile()"
+                    title="下载到系统「下载」目录">⬇ 下载</button>
+                <span class="fp-info" id="fpInfo"></span>
+            </div>
+        </div>
+    </div>
+</div>
+

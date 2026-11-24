@@ -15,6 +15,7 @@ import agent
 import app as app_module
 import runtime
 import tools
+from tests.fakes import patch_agent
 
 PROVIDER_CFG = {
     "api_key": "sk-test",
@@ -103,12 +104,11 @@ def _tool_call_chunks(*calls):
 
 def test_cancel_saves_resumable_state(monkeypatch):
     monkeypatch.setattr(runtime, "is_cancelled", lambda sid=None: True)
-    monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
 
     def boom(*a, **k):
         raise AssertionError("取消后不应再调用 LLM")
 
-    monkeypatch.setattr(agent, "call_llm_with_retry", boom)
+    patch_agent(monkeypatch, boom)
 
     events = list(agent.run_agent_stream("随便干点啥", session_id="s1", user_api_key="k"))
     types = [e["type"] for e in events]
@@ -134,7 +134,6 @@ def test_cancel_saves_resumable_state(monkeypatch):
 def test_resume_after_cancel_continues_the_task(monkeypatch):
     flag = {"cancel": True}
     monkeypatch.setattr(runtime, "is_cancelled", lambda sid=None: flag["cancel"])
-    monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
 
     # 第一次：被取消，存下断点
     list(agent.run_agent_stream("写点东西", session_id="s2", user_api_key="k"))
@@ -142,7 +141,7 @@ def test_resume_after_cancel_continues_the_task(monkeypatch):
 
     # 第二次：用户点「继续」
     flag["cancel"] = False
-    monkeypatch.setattr(agent, "call_llm_with_retry", _llm([_Chunk(_Delta(content="收尾完成"))]))
+    patch_agent(monkeypatch, _llm([_Chunk(_Delta(content="收尾完成"))]))
     events = list(
         agent.run_agent_stream("写点东西", session_id="s2", _resume=True, user_api_key="k")
     )
@@ -160,11 +159,7 @@ def test_resume_after_cancel_continues_the_task(monkeypatch):
 def test_cancel_between_tools_keeps_message_sequence_valid(monkeypatch):
     """两个 tool_call，执行完第一个后用户点停止：
     保存的 messages 必须只保留已处理的那个，否则续跑时 LLM 直接 400。"""
-    monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
-    monkeypatch.setattr(
-        agent,
-        "call_llm_with_retry",
-        _llm(_tool_call_chunks(("list_dir", {"path": "."}), ("get_file_info", {"path": "."}))),
+    patch_agent(monkeypatch, _llm(_tool_call_chunks(("list_dir", {"path": "."}), ("get_file_info", {"path": "."}))),
     )
 
     # 第一个工具执行时触发取消，这样第二个工具前的检查点就会命中
@@ -197,7 +192,6 @@ def test_cancel_between_tools_keeps_message_sequence_valid(monkeypatch):
 def _stub_provider(monkeypatch):
     monkeypatch.setattr(app_module, "get_provider", lambda pid=None: dict(PROVIDER_CFG))
     monkeypatch.setattr(agent, "get_provider", lambda pid=None: dict(PROVIDER_CFG))
-    monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
 
 
 def test_resume_without_state_is_rejected(client, monkeypatch):
@@ -224,7 +218,7 @@ def test_cancel_resume_needs_no_confirm_token(client, monkeypatch):
         {"messages": [{"role": "user", "content": "任务"}], "step": 3, "task": "任务"},
         sid,
     )
-    monkeypatch.setattr(agent, "call_llm_with_retry", _llm([_Chunk(_Delta(content="接着干完"))]))
+    patch_agent(monkeypatch, _llm([_Chunk(_Delta(content="接着干完"))]))
 
     resp = client.post(
         "/run", json={"task": "", "session_id": sid, "resume": True, "project_root": None}
@@ -247,7 +241,7 @@ def test_new_task_clears_previous_resume_point(client, monkeypatch):
     sid = client.post("/sessions").get_json()["id"]
     runtime.set_pending_state({"messages": [], "step": 1, "task": "旧任务"}, sid)
 
-    monkeypatch.setattr(agent, "call_llm_with_retry", _llm([_Chunk(_Delta(content="新任务完成"))]))
+    patch_agent(monkeypatch, _llm([_Chunk(_Delta(content="新任务完成"))]))
     client.post(
         "/run", json={"task": "新任务", "session_id": sid, "provider_id": "deepseek"}
     )

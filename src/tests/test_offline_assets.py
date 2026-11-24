@@ -15,7 +15,6 @@ import paths
 
 # 前端资源现在统一在 <root>/web/ 下，直接引用 paths 常量避免再次重构时失效
 VENDOR_DIR = os.path.join(paths.STATIC_DIR, "vendor")
-TEMPLATE_FILE = os.path.join(paths.TEMPLATES_DIR, "index.html")
 REQUIRED = [
     "marked.min.js",
     "purify.min.js",
@@ -31,14 +30,34 @@ def test_vendor_files_exist_and_non_trivial():
         assert os.path.getsize(path) > 500, f"{name} 体积异常，可能是下载失败的空文件"
 
 
-def test_template_has_no_remote_script_or_link():
-    html = open(TEMPLATE_FILE, encoding="utf-8").read()
-    remote = re.findall(
-        r'<(?:script|link)\b[^>]*?(?:src|href)\s*=\s*["\'](https?://[^"\']+)',
-        html,
-        re.I,
-    )
-    assert not remote, f"模板仍引用外部资源：{remote}"
+def _frontend_files():
+    """前端已拆成模板 + partial + CSS + JS 多文件，外链检查必须覆盖全部。
+
+    只查 index.html 会漏掉 partials 和拆出去的 css/js —— 那正是最容易被
+    顺手贴一个 CDN 链接进来的地方。
+    """
+    roots = [paths.TEMPLATES_DIR, os.path.join(paths.STATIC_DIR, "css"),
+             os.path.join(paths.STATIC_DIR, "js")]
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+        for dirpath, _, names in os.walk(root):
+            for n in sorted(names):
+                if n.endswith((".html", ".css", ".js")):
+                    yield os.path.join(dirpath, n)
+
+
+def test_no_frontend_file_references_remote_assets():
+    remote = []
+    for path in _frontend_files():
+        text = open(path, encoding="utf-8").read()
+        remote += re.findall(
+            r'<(?:script|link)\b[^>]*?(?:src|href)\s*=\s*["\'](https?://[^"\']+)',
+            text,
+            re.I,
+        )
+        remote += re.findall(r'@import\s+["\'](https?://[^"\']+)', text)
+    assert not remote, f"前端仍引用外部资源：{remote}"
 
 
 def test_rendered_page_uses_local_assets_only():

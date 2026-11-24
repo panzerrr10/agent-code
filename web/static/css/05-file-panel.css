@@ -1,0 +1,301 @@
+/* ===== 文件面板标签栏 ===== */
+.fp-tabs {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 5px 8px 0;
+    overflow-x: auto;
+    flex-shrink: 0;
+    border-bottom: 1px solid #eef0f3;
+    scrollbar-width: thin;
+}
+
+.fp-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 6px 4px 9px;
+    border-radius: 7px 7px 0 0;
+    font-size: 11.5px;
+    color: #6b7280;
+    background: #f3f4f6;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    max-width: 170px;
+}
+
+.fp-tab:hover { background: #e5e7eb; }
+
+.fp-tab.active {
+    background: var(--bg-app);
+    color: #111827;
+    font-weight: 600;
+    box-shadow: inset 0 2px 0 #667eea;
+}
+
+.fp-tab-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.fp-tab-dot { color: #f59e0b; margin-left: 2px; }
+
+.fp-tab-x {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 10px;
+    color: #9ca3af;
+    padding: 1px 3px;
+    border-radius: 4px;
+}
+
+.fp-tab-x:hover { background: #d1d5db; color: #111827; }
+
+.fp-tab-count {
+    margin-left: auto;
+    font-size: 10px;
+    color: #9ca3af;
+    padding-left: 8px;
+    flex-shrink: 0;
+}
+
+body.dark .fp-tabs { border-color: #2a2f3a; }
+body.dark .fp-tab { background: #232833; color: #9ca3af; }
+body.dark .fp-tab:hover { background: #2b313d; }
+body.dark .fp-tab.active { background: var(--bg-app); color: #e5e7eb; }
+
+/* ===== 右侧文件面板 ===== */
+.tree-item.active {
+    background: #eef2ff;
+    font-weight: 600;
+}
+
+body.dark .tree-item.active {
+    background: #2b313d;
+}
+
+.file-panel {
+    width: 480px;
+    min-width: 280px;
+    max-width: 80vw;
+    background: var(--bg-app);
+    border-left: 1px solid #eef0f3;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+/* 全屏：盖住整个窗口（含侧边栏），Esc 退出 */
+.file-panel.fullscreen {
+    position: fixed;
+    inset: 0;
+    width: 100vw !important;
+    max-width: none;
+    height: 100vh;
+    z-index: 260;
+}
+
+.file-resizer {
+    width: 5px;
+    margin-left: -3px;
+    cursor: col-resize;
+    background: transparent;
+    flex-shrink: 0;
+    z-index: 5;
+}
+
+.file-resizer:hover,
+.file-resizer.dragging {
+    background: #a5b4fc;
+}
+
+.file-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 9px 12px;
+    border-bottom: 1px solid #eef0f3;
+    flex-shrink: 0;
+}
+
+.fp-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #111827;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.fp-head-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.fp-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px 6px;
+    flex-shrink: 0;
+}
+
+.fp-path {
+    flex: 1;
+    min-width: 0;
+    font-size: 10.5px;
+    color: #9ca3af;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    direction: rtl;      /* 路径太长时优先显示文件名那一端 */
+    text-align: left;
+}
+
+.fp-dirty {
+    font-size: 10.5px;
+    color: #b45309;
+    white-space: nowrap;
+}
+
+.fp-editor {
+    flex: 1;
+    overflow: hidden;
+    min-height: 0;
+}
+
+/* 让 CodeMirror 撑满容器并自己滚动 */
+.fp-editor .cm-editor {
+    height: 100%;
+    font-size: 12.5px;
+}
+
+.fp-editor .cm-scroller {
+    font-family: ui-monospace, Menlo, Consolas, "Courier New", monospace;
+    line-height: 1.55;
+}
+
+.fp-editor .cm-editor.cm-focused {
+    outline: none;
+}
+
+.fp-notice {
+    padding: 8px 12px;
+    font-size: 12px;
+    line-height: 1.6;
+    border-top: 1px solid #eef0f3;
+    background: #f9fafb;
+    color: #374151;
+    flex-shrink: 0;
+}
+
+.fp-notice.warn {
+    background: #fffbeb;
+    color: #92400e;
+}
+
+.fp-notice.error {
+    background: #fef2f2;
+    color: #b91c1c;
+}
+
+.fp-notice-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.fp-foot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border-top: 1px solid #eef0f3;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+.fp-btn {
+    font-size: 12px;
+    padding: 5px 10px;
+    border-radius: 6px;
+    border: 1px solid #e5e7eb;
+    background: #fff;
+    color: #374151;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.fp-btn:hover:not(:disabled) {
+    background: #f9fafb;
+}
+
+.fp-btn:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+}
+
+.fp-btn.primary {
+    background: #667eea;
+    border-color: #667eea;
+    color: #fff;
+}
+
+.fp-btn.primary:hover:not(:disabled) {
+    background: #5568d3;
+}
+
+.fp-btn.danger {
+    background: #ef4444;
+    border-color: #ef4444;
+    color: #fff;
+}
+
+.fp-info {
+    margin-left: auto;
+    font-size: 10.5px;
+    color: #9ca3af;
+    white-space: nowrap;
+}
+
+/* 暗色主题下把面板内的浅色底也一起换掉 */
+body.dark .file-panel {
+    border-left-color: #2a2f3a;
+}
+
+body.dark .file-panel-head,
+body.dark .fp-foot,
+body.dark .fp-notice {
+    border-color: #2a2f3a;
+}
+
+body.dark .fp-notice {
+    background: #1b1f27;
+    color: #cbd5e1;
+}
+
+body.dark .fp-notice.warn {
+    background: #2c2410;
+    color: #fbbf24;
+}
+
+body.dark .fp-notice.error {
+    background: #2c1414;
+    color: #f87171;
+}
+
+body.dark .fp-btn {
+    background: #232833;
+    border-color: #333a47;
+    color: #cbd5e1;
+}
+
+body.dark .fp-btn:hover:not(:disabled) {
+    background: #2b313d;
+}

@@ -72,12 +72,72 @@ def _pack_user_content(task: str, images=None) -> str:
     return task
 
 
+def _sse(event: dict) -> str:
+    """把一条事件编码成 SSE 帧。
+
+    **唯一出口**：格式（``data: `` 前缀 + ``\\n\\n`` 结尾 + 不转义中文）只在这里定义，
+    避免各处手拼时漏掉空行导致前端读不到事件。
+    """
+    return "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
+
+
 def _sse_error(message: str) -> str:
     """构造一条 SSE 错误事件。"""
-    return (
-        "data: "
-        + json.dumps({"type": "error", "content": message}, ensure_ascii=False)
-        + "\n\n"
+    return _sse({"type": "error", "content": message})
+
+
+def _resume_gate(session_id, data: dict) -> str | None:
+    """续跑门控：/run 与 /run_multi 共用（原先两处各抄了一份）。
+
+    续跑分两种，门控不同：
+      A. 挂起等待确认（pending 里有 pending_tool）→ 必须出示一次性确认令牌
+      B. 用户主动中断后的「继续」（pending 里没有 pending_tool）→ 免令牌，
+         因为它不会直接执行挂起的危险操作；后续危险操作仍会重新走确认流程
+
+    Returns:
+        错误消息（调用方 yield 一条 SSE error 后 return）；放行时返回 ``None``。
+    """
+    import runtime
+
+    if not data.get("resume"):
+        # 新任务开始：清掉上一轮残留的续跑点，避免「继续」接到旧状态
+        runtime.clear_pending_state(session_id)
+        return None
+
+    state = runtime.get_pending_state(session_id)
+    if not state:
+        return "没有可续跑的任务（可能已完成、已过期，或被新任务覆盖）"
+    if state.get("pending_tool") and not runtime.verify_and_consume_confirm_token(
+        session_id, data.get("confirm_token")
+    ):
+        return "确认令牌无效或已过期，请重新发起任务"
+    return None
+
+
+def _save_answer(
+    session_id, answer: str, tool_events, token_usage, *, empty_fallback: str = ""
+) -> None:
+    """把一轮的「回答 + 工具记录 + token 用量」落库。
+
+    /run 与 /run_multi（正常结束 / 用户中断）三处原先各写了一遍同样的
+    ``json.dumps`` + ``save_message``，这里收敛成一处。
+
+    Args:
+        session_id: 会话 id。
+        answer: 本轮文本回答；为空时按 ``empty_fallback`` 处理。
+        tool_events: 工具调用与结果事件列表（用于刷新后回看执行详情）。
+        token_usage: token 统计（可能为 None）。
+        empty_fallback: 回答为空时的兜底文案；传空串表示原样存空。
+    """
+    if empty_fallback and not answer:
+        answer = empty_fallback
+    db.save_message(
+        session_id,
+        "assistant",
+        json.dumps(
+            {"answer": answer, "tools": tool_events, "tokens": token_usage},
+            ensure_ascii=False,
+        ),
     )
 
 
@@ -238,14 +298,6 @@ def project_tree():
 
 # ============ 附件（上传给 Agent 看 / 改）与下载 ============
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-# 这些后缀直接按 UTF-8 文本读；.pdf / .docx 交给 rag 里的解析器
-TEXT_EXT = {
-    ".txt", ".md", ".markdown", ".rst", ".log", ".csv", ".tsv", ".json", ".yaml", ".yml",
-    ".toml", ".ini", ".cfg", ".conf", ".xml", ".html", ".htm", ".css", ".scss", ".less",
-    ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".py", ".rb", ".go", ".rs", ".java",
-    ".kt", ".c", ".h", ".cpp", ".hpp", ".cs", ".php", ".sh", ".bash", ".zsh", ".sql",
-    ".env", ".gitignore", ".dockerfile",
-}
 
 
 def _extract_attachment_text(name: str, raw: bytes) -> tuple[str | None, str | None]:
@@ -947,7 +999,6 @@ def test_provider():
     「模型名不存在」，这两种只有真调一次才知道。所以这里发一个 1 token 的请求。
     """
     from config_providers import get_provider
-    from utils import get_llm_client
 
     data = request.get_json(silent=True) or {}
     pid = (data.get("id") or "").strip()
@@ -964,11 +1015,13 @@ def test_provider():
         return jsonify({"ok": False, "error": "还没有填模型名称"}), 400
 
     try:
-        client = get_llm_client(api_key, base_url)
-        client.chat.completions.create(
-            model=model, messages=[{"role": "user", "content": "hi"}],
-            max_tokens=1, timeout=20,
+        import llm
+
+        chat = llm.build_chat_model(
+            api_key=api_key, base_url=base_url, model=model,
+            timeout=20, streaming=False,
         )
+        chat.invoke("hi", max_tokens=1)
     except Exception as e:                                  # noqa: BLE001
         # 各家 SDK 的异常类型不一样，统一转成可读文案；绝不回显密钥
         return jsonify({"ok": False, "error": f"连接失败：{type(e).__name__}: {e}"}), 200
@@ -1225,23 +1278,10 @@ def run():
 
         _rt_run.set_session_id(session_id)
         try:
-            # 续跑分两种，门控不同：
-            #  A. 挂起等待确认（pending 里有 pending_tool）→ 必须出示一次性确认令牌
-            #  B. 用户主动中断后的「继续」（pending 里没有 pending_tool）→ 免令牌，
-            #     因为它不会直接执行挂起的危险操作；后续危险操作仍会重新走确认流程
-            if resume:
-                _state = _rt_run.get_pending_state(session_id)
-                if not _state:
-                    yield _sse_error("没有可续跑的任务（可能已完成、已过期，或被新任务覆盖）")
-                    return
-                if _state.get("pending_tool") and not _rt_run.verify_and_consume_confirm_token(
-                    session_id, data.get("confirm_token")
-                ):
-                    yield _sse_error("确认令牌无效或已过期，请重新发起任务")
-                    return
-            else:
-                # 新任务开始：清掉上一轮残留的续跑点，避免「继续」接到旧状态
-                _rt_run.clear_pending_state(session_id)
+            _gate_err = _resume_gate(session_id, data)
+            if _gate_err:
+                yield _sse_error(_gate_err)
+                return
 
             # 保存用户任务（图片以 Base64 data URL 一起入库，刷新后历史仍可回显）
             images = data.get("images") or []   # 多模态图片（data URL 数组）
@@ -1341,7 +1381,7 @@ def run():
                         "steps": event.get("steps"),
                     }
 
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                yield _sse(event)
 
             # 保存 AI 回答（含工具执行记录，用于后续恢复）
             if pending_confirm:
@@ -1350,18 +1390,15 @@ def run():
                 pass
             else:
                 # 即使 full_answer 为空也保存，避免"只调工具没输出"时丢消息
-                saved_answer = full_answer if full_answer else "（已执行工具，无文本输出）"
-                saved = json.dumps(
-                    {
-                        "answer": saved_answer,
-                        "tools": tool_events,
-                        "tokens": token_usage,
-                    },
-                    ensure_ascii=False,
+                _save_answer(
+                    session_id,
+                    full_answer,
+                    tool_events,
+                    token_usage,
+                    empty_fallback="（已执行工具，无文本输出）",
                 )
-                db.save_message(session_id, "assistant", saved)
         except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
+            yield _sse_error(str(e))
         finally:
             # 正常结束 / 异常 / 客户端断开都要注销取消标志，避免状态残留
             _rt_run.clear_run(session_id)
@@ -1763,19 +1800,11 @@ def run_multi():
         if not (data.get("project_root") or "").strip():
             _rt_multi.clear_project_root(session_id)
         try:
-            # 续跑门控与 /run 一致：挂起确认要令牌，纯「继续」免令牌
-            if resume:
-                _state = _rt_multi.get_pending_state(session_id)
-                if not _state:
-                    yield _sse_error("没有可续跑的任务（可能已完成、已过期，或被新任务覆盖）")
-                    return
-                if _state.get("pending_tool") and not _rt_multi.verify_and_consume_confirm_token(
-                    session_id, data.get("confirm_token")
-                ):
-                    yield _sse_error("确认令牌无效或已过期，请重新发起任务")
-                    return
-            else:
-                _rt_multi.clear_pending_state(session_id)
+            # 续跑门控与 /run 一致（共用 _resume_gate）
+            _gate_err = _resume_gate(session_id, data)
+            if _gate_err:
+                yield _sse_error(_gate_err)
+                return
 
             # 批次 6：三角色各自可以独立选 provider，默认继承 executor 的
             executor_provider_id = data.get("provider_id") or get_default_provider_id()
@@ -1809,7 +1838,7 @@ def run_multi():
 
             if not resume:
                 # ========== Step 1: Planner 规划 ==========
-                yield f"data: {json.dumps({'type': 'phase', 'name': 'planner', 'status': 'doing'}, ensure_ascii=False)}\n\n"
+                yield _sse({'type': 'phase', 'name': 'planner', 'status': 'doing'})
                 plan = create_plan(
                     task,
                     api_key=planner_api_key,
@@ -1817,15 +1846,15 @@ def run_multi():
                     model=planner_model,
                     project_root=_rt_multi.get_project_root(),
                 )
-                yield f"data: {json.dumps({'type': 'plan_from_planner', 'plan': plan}, ensure_ascii=False)}\n\n"
+                yield _sse({'type': 'plan_from_planner', 'plan': plan})
                 if plan.get("explored"):
                     # Planner 现在会先只读探索项目再规划 —— 让用户看到它查了几个文件，
                     # 而不是「凭空冒出一份计划」
-                    yield f"data: {json.dumps({'type': 'planner_explored', 'tool_calls': plan['explored']}, ensure_ascii=False)}\n\n"
+                    yield _sse({'type': 'planner_explored', 'tool_calls': plan['explored']})
 
                 if plan.get("error"):
                     error_msg = f"⚠️ 规划失败：{plan.get('error')}，降级为单 Agent 模式"
-                    yield f"data: {json.dumps({'type': 'text', 'content': error_msg}, ensure_ascii=False)}\n\n"
+                    yield _sse({'type': 'text', 'content': error_msg})
 
                 steps = plan.get("steps", [task])
                 # 把 Planner 的计划同步到 tools 内存
@@ -1834,15 +1863,15 @@ def run_multi():
 
                     tools.create_plan(steps)
                 except Exception as e:
-                    yield f"data: {json.dumps({'type': 'text', 'content': f'⚠️ 同步计划失败：{e}'}, ensure_ascii=False)}\n\n"
-                yield f"data: {json.dumps({'type': 'phase', 'name': 'planner', 'status': 'done'}, ensure_ascii=False)}\n\n"
+                    yield _sse({'type': 'text', 'content': f'⚠️ 同步计划失败：{e}'})
+                yield _sse({'type': 'phase', 'name': 'planner', 'status': 'done'})
             else:
                 # 续跑：不重新规划，plan 从 pending_state 恢复
                 steps = None   # 会在 run_agent_stream 里从 pending 恢复
-                yield f"data: {json.dumps({'type': 'phase', 'name': 'planner', 'status': 'done'}, ensure_ascii=False)}\n\n"
+                yield _sse({'type': 'phase', 'name': 'planner', 'status': 'done'})
 
             # ========== Step 2: Executor 执行 ==========
-            yield f"data: {json.dumps({'type': 'phase', 'name': 'executor', 'status': 'doing'}, ensure_ascii=False)}\n\n"
+            yield _sse({'type': 'phase', 'name': 'executor', 'status': 'doing'})
 
             # 保存用户任务（图片以 Base64 data URL 一起入库）
             # 续跑（resume）时上一轮已存过用户消息，不再重复入库
@@ -1869,7 +1898,7 @@ def run_multi():
             ):
                 # 续跑时若再次触发确认：转发确认事件后立即结束，不再往下走 Reviewer
                 if str(event.get("type", "")).startswith("confirm_"):
-                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    yield _sse(event)
                     return
                 # 转发事件
                 if event.get("type") == "tool_call":
@@ -1892,39 +1921,23 @@ def run_multi():
                 elif event.get("type") == "token_usage":
                     token_usage = event
 
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                yield _sse(event)
 
-            yield f"data: {json.dumps({'type': 'phase', 'name': 'executor', 'status': 'done'}, ensure_ascii=False)}\n\n"
+            yield _sse({'type': 'phase', 'name': 'executor', 'status': 'done'})
 
             # 用户已请求停止：保存已产出的内容，但不再进入 Reviewer 审查
             if _rt_multi.is_cancelled():
-                saved = json.dumps(
-                    {
-                        "answer": full_answer,
-                        "tools": tool_events,
-                        "tokens": token_usage,
-                    },
-                    ensure_ascii=False,
-                )
-                db.save_message(session_id, "assistant", saved)
-                yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+                _save_answer(session_id, full_answer, tool_events, token_usage)
+                yield _sse({'type': 'done'})
                 return
 
             # 保存 Executor 结果
-            saved = json.dumps(
-                {
-                    "answer": full_answer,
-                    "tools": tool_events,
-                    "tokens": token_usage,
-                },
-                ensure_ascii=False,
-            )
-            db.save_message(session_id, "assistant", saved)
+            _save_answer(session_id, full_answer, tool_events, token_usage)
 
             # ========== Step 3: Reviewer 审查 ==========
             # Reviewer 现在能自己读文件、跑测试（见 reviewer.py 的说明），
             # 所以「评审通过」不再只是「相信 Executor 的自述」。
-            yield f"data: {json.dumps({'type': 'phase', 'name': 'reviewer', 'status': 'doing'}, ensure_ascii=False)}\n\n"
+            yield _sse({'type': 'phase', 'name': 'reviewer', 'status': 'doing'})
             review_result = review(
                 task,
                 full_answer,
@@ -1934,16 +1947,16 @@ def run_multi():
                 model=reviewer_model,
                 project_root=_rt_multi.get_project_root(),
             )
-            yield f"data: {json.dumps({'type': 'review_result', 'result': review_result}, ensure_ascii=False)}\n\n"
+            yield _sse({'type': 'review_result', 'result': review_result})
             if not review_result.get("tests_run"):
                 # 明说「本次评审没有硬证据」，避免用户把「评审通过」读成「测试通过」
-                yield f"data: {json.dumps({'type': 'review_note', 'content': '本次评审未运行测试，结论基于静态审查。'}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type': 'phase', 'name': 'reviewer', 'status': 'done'}, ensure_ascii=False)}\n\n"
+                yield _sse({'type': 'review_note', 'content': '本次评审未运行测试，结论基于静态审查。'})
+            yield _sse({'type': 'phase', 'name': 'reviewer', 'status': 'done'})
 
-            yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+            yield _sse({'type': 'done'})
 
         except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
+            yield _sse_error(str(e))
         finally:
             _rt_multi.clear_run(session_id)
 

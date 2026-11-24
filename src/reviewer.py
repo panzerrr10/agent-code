@@ -29,9 +29,8 @@ Reviewer 是无人值守的小循环，**没有确认通道**（不可能弹卡�
 
 from __future__ import annotations
 
-import json
-
 import mini_agent
+from utils import extract_json as _extract_json
 
 REVIEWER_PROMPT = """你是一个结果审查专家。你需要**自己动手核实** Executor 是否真的完成了任务。
 
@@ -62,33 +61,6 @@ REVIEWER_PROMPT = """你是一个结果审查专家。你需要**自己动手核
 
 如果信息不足以下结论，`passed` 输出 `null`（不要默认 true）。
 """
-
-
-def _extract_json(content: str) -> dict | None:
-    """从模型输出里抠出 JSON（容忍 ```json 包裹和前后废话）。"""
-    if not content:
-        return None
-
-    text = content.strip()
-    if text.startswith("```"):
-        parts = text.split("```")
-        if len(parts) >= 2:
-            text = parts[1]
-            if text.startswith("json"):
-                text = text[4:]
-            text = text.strip()
-    try:
-        return json.loads(text)
-    except Exception:                                        # noqa: BLE001
-        pass
-
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end > start:
-        try:
-            return json.loads(text[start:end + 1])
-        except Exception:                                    # noqa: BLE001
-            return None
-    return None
 
 
 def _test_tool_available() -> bool:

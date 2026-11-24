@@ -24,15 +24,47 @@ import pytest
 
 sys.path.insert(0, "src")
 
-INDEX = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__)))), "web", "templates", "index.html")
+WEB = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), "web")
+INDEX = os.path.join(WEB, "templates", "index.html")
+PARTIAL_DIR = os.path.join(WEB, "templates", "partials")
+JS_DIR = os.path.join(WEB, "static", "js")
+CSS_DIR = os.path.join(WEB, "static", "css")
+
+# 前端已从「单文件」拆成 CSS / JS / HTML 三组文件。
+# 这些用例原本盯的是「那一大坨内联代码」，现在必须盯「整组文件」——
+# 否则拆完之后检查会静默变成空转（内联只剩几十行鉴权脚本）。
+#
+# 顺序必须与 index.html 里的加载顺序一致：文件用数字前缀命名，
+# 按文件名排序 == 按依赖顺序，与运行时行为一致。
+def _read_group(directory: str, suffix: str) -> str:
+    names = sorted(n for n in os.listdir(directory) if n.endswith(suffix))
+    assert names, f"{directory} 下没有 {suffix} 文件"
+    return "\n".join(open(os.path.join(directory, n), encoding="utf-8").read()
+                     for n in names)
+
+
+def _css() -> str:
+    return _read_group(CSS_DIR, ".css")
+
+
+def _page_source() -> str:
+    """模板 + 所有 partial 拼起来 = 浏览器实际看到的页面结构（含内联 onclick）。"""
+    parts = [open(INDEX, encoding="utf-8").read()]
+    if os.path.isdir(PARTIAL_DIR):
+        for n in sorted(os.listdir(PARTIAL_DIR)):
+            if n.endswith(".html"):
+                parts.append(open(os.path.join(PARTIAL_DIR, n), encoding="utf-8").read())
+    return "\n".join(parts)
 
 
 def _inline_js() -> str:
+    """全部前端 JS = 各 js 文件（按加载顺序）+ index.html 里残留的内联脚本。"""
     with open(INDEX, encoding="utf-8") as f:
         html = f.read()
     blocks = re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", html, re.S)
-    return "\n".join(blocks).replace("{{ auth_token | tojson }}", '"T"')
+    inline = "\n".join(blocks).replace("{{ auth_token | tojson }}", '"T"')
+    return _read_group(JS_DIR, ".js") + "\n" + inline
 
 
 # 浏览器 / 语言内置，不算「未定义」
@@ -163,8 +195,7 @@ def _called_from_html_attrs(html: str) -> set:
 
 def test_html_inline_handlers_reference_real_functions():
     """HTML 内联 onclick/onchange 里调用的函数必须真的存在。"""
-    with open(INDEX, encoding="utf-8") as f:
-        html = f.read()
+    html = _page_source()
     js = _inline_js()
 
     called = _called_from_html_attrs(html)
@@ -391,15 +422,14 @@ def test_css_braces_are_balanced():
     表现成「改了样式但没生效」，极难定位。这次追加了一整块设计尺度，
     值得加一条兜底。
     """
-    with open(INDEX, encoding="utf-8") as f:
-        html = f.read()
-    blocks = re.findall(r"<style[^>]*>(.*?)</style>", html, re.S)
-    assert blocks, "没找到 <style> 块"
-    for i, css in enumerate(blocks):
+    names = sorted(n for n in os.listdir(CSS_DIR) if n.endswith(".css"))
+    assert names, "没找到 CSS 文件"
+    for name in names:
+        css = open(os.path.join(CSS_DIR, name), encoding="utf-8").read()
         # 去掉注释再数，注释里的 { } 不算
         stripped = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
         assert stripped.count("{") == stripped.count("}"), (
-            f"第 {i+1} 个 <style> 块括号不配对："
+            f"{name} 括号不配对："
             f"{{ × {stripped.count('{')}，}} × {stripped.count('}')}"
         )
 
@@ -409,8 +439,7 @@ def test_design_tokens_are_defined():
 
     如果哪天有人把它删了，样式不会报错，但按钮会悄悄退回各写各的状态。
     """
-    with open(INDEX, encoding="utf-8") as f:
-        html = f.read()
+    html = _css()
     for token in ("--sp-1", "--r-md", "--fs-md", "--accent", "--shadow-1", "--bg-header"):
         assert f"{token}:" in html, f"设计尺度里缺少 {token}"
     assert "body.dark {" in html, "缺少暗色模式的 token 覆盖"
@@ -450,8 +479,7 @@ def test_theme_tokens_are_defined_in_both_modes():
     只定义一边的后果是静默的：那块区域会一直用另一套颜色，
     比如暗色模式下面板仍是白底 —— 正是这次要修的问题。
     """
-    with open(INDEX, encoding="utf-8") as f:
-        html = f.read()
+    html = _css()
     light, dark = _theme_blocks(html)
     assert light and dark, "找不到 :root / body.dark 的 token 块"
     missing_light = [t for t in THEME_TOKENS if f"{t}:" not in light]
@@ -466,8 +494,7 @@ def test_caret_color_is_shared_by_both_modes():
     顺便：白底上纯黑光标太扎眼、黑底上纯白光标更扎眼，
     中间调的灰在两边都清楚。
     """
-    with open(INDEX, encoding="utf-8") as f:
-        html = f.read()
+    html = _css()
     light, dark = _theme_blocks(html)
     m1 = re.search(r"--caret:\s*(#\w+)", light)
     m2 = re.search(r"--caret:\s*(#\w+)", dark)
@@ -497,8 +524,7 @@ def test_assistant_answer_is_not_boxed():
       · bubble-wrap 占满（原来是 88%）
       · **只对助手消息生效**：用户消息要保留气泡，那能一眼区分「谁说的」
     """
-    with open(INDEX, encoding="utf-8") as f:
-        html = f.read()
+    html = _css()
 
     def rule(selector):
         """取出某个选择器的最后一条规则体（后面的覆盖前面的）。"""
@@ -524,8 +550,7 @@ def test_flat_layout_keeps_inline_code_visible():
 
     否则 `code` 会和正文糊在一起 —— 原来它是靠卡片底色衬托的。
     """
-    with open(INDEX, encoding="utf-8") as f:
-        html = f.read()
+    html = _css()
     assert ".msg.assistant .bubble code:not(pre code)" in html, \
         "缺少行内 code 的独立底色规则"
     # 搜索命中时仍要能看出是哪条
@@ -536,8 +561,7 @@ def test_flat_layout_keeps_inline_code_visible():
 
 
 def _html() -> str:
-    with open(INDEX, encoding="utf-8") as f:
-        return f.read()
+    return _page_source()
 
 
 def test_session_stats_bar_exists_below_input_area():
@@ -554,7 +578,7 @@ def test_session_stats_bar_exists_below_input_area():
     stats_pos = html.index('id="sessionStats"')
     assert stats_pos > input_area_end, "用量条必须在输入区之后（即下方）"
     # 输入区底 padding 必须收窄过，否则要多占一条高度
-    assert ".input-area {" in html
+    html = _css()
     # 允许 { 和 padding 之间夹注释
     m = re.search(r"\.input-area \{.*?padding:\s*14px 20px (\d+)px;", html, re.S)
     assert m and int(m.group(1)) <= 6, "输入区底 padding 没收窄，输入框不会上移"
@@ -562,7 +586,7 @@ def test_session_stats_bar_exists_below_input_area():
 
 def test_session_stats_css_is_small_and_muted():
     """「不用太大」——字号要小、颜色要弱，别抢输入框的注意力。"""
-    html = _html()
+    html = _css()
     m = re.search(r"\.session-stats \{(.*?)\}", html, re.S)
     assert m, "缺少 .session-stats 样式"
     css = m.group(1)

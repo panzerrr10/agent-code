@@ -1,3 +1,4 @@
+
 """prompt 缓存命中统计的采集。
 
 **为什么要先做这个**：多步 Agent 每一步都把「系统提示 + 工具 schema + 代码库索引
@@ -18,6 +19,7 @@ import types
 
 import pytest
 
+from tests.fakes import patch_agent
 from utils import cache_hit_rate, extract_cache_stats
 
 
@@ -150,9 +152,7 @@ def test_agent_emits_cache_stats(monkeypatch):
                 prompt_cache_hit_tokens=800, prompt_cache_miss_tokens=200,
             )
 
-    monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
-    monkeypatch.setattr(agent, "_get_default_client", lambda: object())
-    monkeypatch.setattr(agent, "call_llm_with_retry", lambda *a, **k: iter([_Chunk()]))
+    patch_agent(monkeypatch, lambda *a, **k: iter([_Chunk()]))
 
     events = list(agent.run_agent_stream("干活", session_id=sid, user_api_key="k"))
     usage_ev = next(e for e in events if e["type"] == "token_usage")

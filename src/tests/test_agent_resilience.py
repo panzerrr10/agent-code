@@ -20,6 +20,7 @@ import pytest
 
 import agent
 import compaction
+from tests.fakes import patch_agent
 
 # ============ 流式假件 ============
 
@@ -85,8 +86,6 @@ def env(monkeypatch):
     卡片并 return，根本走不到失败计数那一段（踩过一次：测试看起来在测熔断，
     其实每次都停在确认挂起处）。
     """
-    monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
-    monkeypatch.setattr(agent, "_get_default_client", lambda: object())
     import db
     import runtime
 
@@ -114,9 +113,7 @@ def test_failure_counter_resets_on_success(env, monkeypatch):
     runtime, sid = env
     results = iter(["❌ 失败", "✅ 成功", "❌ 失败", "✅ 成功", "❌ 失败", "✅ 成功"])
     monkeypatch.setattr(agent, "execute_tool", lambda n, a: next(results, "✅ 成功"))
-    monkeypatch.setattr(
-        agent, "call_llm_with_retry",
-        _stream(*_repeat(_tool_call(0, "write_file", {"path": "a.py", "content": "x"}))),
+    patch_agent(monkeypatch, _stream(*_repeat(_tool_call(0, "write_file", {"path": "a.py", "content": "x"}))),
     )
 
     events = _run(sid)
@@ -127,9 +124,7 @@ def test_three_consecutive_failures_still_stop(env, monkeypatch):
     """真正的连续失败仍要熔断 —— 别把修复做成「永不熔断」。"""
     runtime, sid = env
     monkeypatch.setattr(agent, "execute_tool", lambda n, a: "❌ 一直失败")
-    monkeypatch.setattr(
-        agent, "call_llm_with_retry",
-        _stream(*_repeat(_tool_call(0, "write_file", {"path": "a.py", "content": "x"}))),
+    patch_agent(monkeypatch, _stream(*_repeat(_tool_call(0, "write_file", {"path": "a.py", "content": "x"}))),
     )
     assert "已连续失败 3 次" in _texts(_run(sid))
 
@@ -141,9 +136,7 @@ def test_failure_warning_keeps_pairing_valid(env, monkeypatch):
     """两次失败后 messages 里不能出现 assistant→user→tool 的非法交错。"""
     runtime, sid = env
     monkeypatch.setattr(agent, "execute_tool", lambda n, a: "❌ 写入失败")
-    monkeypatch.setattr(
-        agent, "call_llm_with_retry",
-        _stream(*_repeat(_tool_call(0, "write_file", {"path": "a.py", "content": "x"}))),
+    patch_agent(monkeypatch, _stream(*_repeat(_tool_call(0, "write_file", {"path": "a.py", "content": "x"}))),
     )
     _run(sid)
 
@@ -168,7 +161,7 @@ def test_llm_error_saves_resume_point(env, monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("429 rate limit exceeded")
 
-    monkeypatch.setattr(agent, "call_llm_with_retry", boom)
+    patch_agent(monkeypatch, boom)
 
     events = _run(sid)
     assert any(e["type"] == "error" for e in events)
@@ -184,7 +177,7 @@ def test_context_length_error_gets_friendly_message(env, monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("400 This model's maximum context length is 65536 tokens")
 
-    monkeypatch.setattr(agent, "call_llm_with_retry", boom)
+    patch_agent(monkeypatch, boom)
     err = next(e for e in _run(sid) if e["type"] == "error")
     assert "上下文" in err["content"]
 
@@ -196,9 +189,7 @@ def test_each_step_persists_resume_point(env, monkeypatch):
     """正常收尾仍要清掉断点（不能因为多写了几次就留下脏状态）。"""
     runtime, sid = env
     monkeypatch.setattr(agent, "execute_tool", lambda n, a: "ok")
-    monkeypatch.setattr(
-        agent, "call_llm_with_retry",
-        _stream(
+    patch_agent(monkeypatch, _stream(
             _tool_call(0, "list_dir", {"path": "."}),
             _tool_call(0, "list_dir", {"path": "."}),
             _final("完成"),
@@ -217,7 +208,7 @@ def test_pending_saved_before_llm_call(env, monkeypatch):
         captured["state"] = runtime.get_pending_state(sid)
         raise RuntimeError("connection reset")
 
-    monkeypatch.setattr(agent, "call_llm_with_retry", boom)
+    patch_agent(monkeypatch, boom)
     _run(sid)
     assert captured["state"] is not None, "LLM 调用前就该有断点了"
 
@@ -246,9 +237,7 @@ def test_pairing_repair_is_wired_in(env, monkeypatch):
     monkeypatch.setattr(agent.compaction, "compact", fake_compact)
     monkeypatch.setattr(compaction, "repair_pairing", spy)
     monkeypatch.setattr(agent, "execute_tool", lambda n, a: "ok")
-    monkeypatch.setattr(
-        agent, "call_llm_with_retry",
-        _stream(_tool_call(0, "list_dir", {"path": "."}), _final("好了")),
+    patch_agent(monkeypatch, _stream(_tool_call(0, "list_dir", {"path": "."}), _final("好了")),
     )
 
     events = _run(sid)

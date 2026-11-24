@@ -19,6 +19,7 @@ import db
 import runtime
 import tools
 import trash
+from tests.fakes import patch_agent
 
 HOME = os.path.expanduser("~")
 
@@ -208,7 +209,6 @@ def _llm(chunks):
 def project(monkeypatch):
     d = tempfile.mkdtemp(prefix=".agentcode-persist-", dir=HOME)
     monkeypatch.setattr(trash, "TRASH_DIR", os.path.join(d, ".trash"))
-    monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
     yield d
     shutil.rmtree(d, ignore_errors=True)
 
@@ -219,10 +219,7 @@ def test_confirm_and_resume_still_works_after_restart(project, monkeypatch):
     with open(target, "w", encoding="utf-8") as f:
         f.write("OLD")
 
-    monkeypatch.setattr(
-        agent,
-        "call_llm_with_retry",
-        _llm(
+    patch_agent(monkeypatch, _llm(
             [
                 _Chunk(
                     _Delta(

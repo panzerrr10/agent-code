@@ -1,3 +1,4 @@
+
 """权限分级（只读 / 确认 / 完全）与危险操作拦截的回归测试。
 
 三件事必须守住：
@@ -12,6 +13,8 @@ import sys
 import types
 
 import pytest
+
+from tests.fakes import patch_agent
 
 sys.path.insert(0, "src")
 
@@ -317,8 +320,7 @@ def _final(text):
 
 
 def _run(sid, monkeypatch, *chunks):
-    monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
-    monkeypatch.setattr(agent, "call_llm_with_retry", _stream(*chunks))
+    patch_agent(monkeypatch, _stream(*chunks))
     return list(agent.run_agent_stream("随便干点啥", session_id=sid, user_api_key="k"))
 
 
@@ -329,12 +331,11 @@ def test_regression_tool_step_must_continue_to_next_step(monkeypatch):
     就结束了（还谎报一个空的最终答案）。这里用「两轮响应」把它钉死。
     """
     sid = _sid(2)
-    monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
     fake = _stream(
         _tool_call(0, "list_dir", {"path": "."}),   # 第 1 轮：调只读工具
         _final("最终答案在此"),                      # 第 2 轮：给答案
     )
-    monkeypatch.setattr(agent, "call_llm_with_retry", fake)
+    patch_agent(monkeypatch, fake)
     events = list(agent.run_agent_stream("随便干点啥", session_id=sid, user_api_key="k"))
 
     assert fake.state["calls"] == 2, (
@@ -455,10 +456,7 @@ def test_run_endpoint_uses_server_side_level(client, monkeypatch):
 
     monkeypatch.setattr(app_module, "get_provider", lambda pid=None: dict(PROVIDER_CFG))
     monkeypatch.setattr(agent, "get_provider", lambda pid=None: dict(PROVIDER_CFG))
-    monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
-    monkeypatch.setattr(
-        agent, "call_llm_with_retry",
-        _stream(_tool_call(0, "write_file", {"path": "/tmp/evil.txt", "content": "x"}), _final("ok")),
+    patch_agent(monkeypatch, _stream(_tool_call(0, "write_file", {"path": "/tmp/evil.txt", "content": "x"}), _final("ok")),
     )
 
     resp = client.post(

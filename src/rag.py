@@ -6,19 +6,23 @@ from paths import CHROMA_DIR
 load_dotenv()
 
 
-def get_client(api_key: str = None, base_url: str = None):
-    """取 RAG 用的 OpenAI 客户端（进程内按 key/url 复用）。
+def get_embeddings(api_key: str = None, base_url: str = None, model: str = None):
+    """取 RAG 用的 embedding 客户端（LangChain ``OpenAIEmbeddings``）。
 
-    优先级：显式传入参数 > runtime 会话配置 > config_providers 的 RAG 配置（锁死阿里云百炼）。
+    优先级：显式传入参数 > runtime 会话配置 > config_providers 的 RAG 配置。
+
+    ``check_embedding_ctx_length=False`` 是必须的：默认实现会先把文本
+    转成 token 数组再发，而百炼 / 智谱这类兼容端点只接受字符串输入，
+    不关掉就会报「input 类型错误」。
     """
+    from langchain_openai import OpenAIEmbeddings
+
     import runtime
     from config_providers import get_rag_config
-    from utils import get_llm_client
 
     key = api_key or runtime.get_effective_rag_api_key()
     url = base_url or runtime.get_effective_rag_base_url()
 
-    # fallback 到 config_providers 的 RAG 配置（RAG_PROVIDER = bailian）
     if not key or not url:
         rag_cfg = get_rag_config()
         key = key or rag_cfg.get("api_key")
@@ -26,7 +30,13 @@ def get_client(api_key: str = None, base_url: str = None):
 
     if not key or key.startswith("sk-placeholder"):
         raise RuntimeError("未配置 RAG API Key。请检查 .env 中的 DASHSCOPE_API_KEY。")
-    return get_llm_client(key, url)
+
+    return OpenAIEmbeddings(
+        model=model or _get_embedding_model(url),
+        api_key=key,
+        base_url=url,
+        check_embedding_ctx_length=False,
+    )
 
 # ===== Chroma 客户端 =====
 chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
@@ -50,15 +60,13 @@ def _get_embedding_model(base_url: str = None) -> str:
 
 
 def embed_texts(texts: list, batch_size: int = 10, api_key: str = None, base_url: str = None) -> list:
+    """批量向量化（LangChain ``embed_documents``）。"""
     all_embeddings = []
     import runtime
     effective_url = base_url or runtime.get_effective_rag_base_url()
-    model = _get_embedding_model(effective_url)
-    client = get_client(api_key, effective_url)
+    embeddings = get_embeddings(api_key, effective_url)
     for i in range(0, len(texts), batch_size):
-        batch = texts[i:i + batch_size]
-        resp = client.embeddings.create(model=model, input=batch)
-        all_embeddings.extend([item.embedding for item in resp.data])
+        all_embeddings.extend(embeddings.embed_documents(texts[i:i + batch_size]))
     return all_embeddings
 
 # ===== 文件文本提取 =====
@@ -213,12 +221,3 @@ def search_similar(
 def delete_document_from_vectorstore(doc_id: int):
     """从 Chroma 删除某个文档的所有片段"""
     collection.delete(where={"doc_id": doc_id})
-
-
-# ===== 统计 =====
-def get_collection_count() -> int:
-    """当前向量库片段总数"""
-    try:
-        return collection.count()
-    except Exception:
-        return 0

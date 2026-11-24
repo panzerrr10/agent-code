@@ -19,6 +19,7 @@ import planner
 import policy
 import reviewer
 import runtime
+from tests.fakes import patch_mini
 
 
 def _msg(content=None, tool_calls=None):
@@ -47,7 +48,12 @@ def _default_policy(monkeypatch, tmp_path):
 
 @pytest.fixture
 def _fake_client(monkeypatch):
-    monkeypatch.setattr(mini_agent, "_client_and_model", lambda *a, **k: (object(), "m"))
+    """兼容旧用例的占位 fixture。
+
+    以前这里负责把 openai 客户端替换掉；现在模型注入由 ``patch_mini`` 在
+    每个用例里单独完成，这个 fixture 不再需要做任何事。
+    """
+    return None
 
 
 # ============ mini_agent：白名单与权限 ============
@@ -62,9 +68,7 @@ def test_disallowed_tool_is_rejected(monkeypatch, _fake_client):
         return "执行了"
 
     monkeypatch.setattr(mini_agent, "execute_tool", fake_execute)
-    monkeypatch.setattr(
-        mini_agent, "call_llm_with_retry",
-        lambda *a, **k: _resp(_msg(tool_calls=[_tool_call("1", "write_file", '{"path":"x"}')])),
+    patch_mini(monkeypatch, lambda *a, **k: _resp(_msg(tool_calls=[_tool_call("1", "write_file", '{"path":"x"}')])),
     )
 
     out = mini_agent.run_tool_loop(
@@ -87,7 +91,7 @@ def test_allowed_readonly_tool_executes(monkeypatch, _fake_client):
         _resp(_msg(tool_calls=[_tool_call("1", "read_file", '{"path":"a.py"}')])),
         _resp(_msg(content="看完了")),
     ])
-    monkeypatch.setattr(mini_agent, "call_llm_with_retry", lambda *a, **k: next(responses))
+    patch_mini(monkeypatch, lambda *a, **k: next(responses))
 
     out = mini_agent.run_tool_loop(
         system_prompt="s", user_content="u", allowed_tools=["read_file"], max_steps=3
@@ -102,9 +106,7 @@ def test_run_tests_denied_at_level1(monkeypatch, _fake_client):
     monkeypatch.setattr(runtime, "get_permission_level", lambda sid=None: 1)
     executed = []
     monkeypatch.setattr(mini_agent, "execute_tool", lambda n, a: executed.append(n) or "ok")
-    monkeypatch.setattr(
-        mini_agent, "call_llm_with_retry",
-        lambda *a, **k: _resp(_msg(tool_calls=[_tool_call("1", "run_tests")])),
+    patch_mini(monkeypatch, lambda *a, **k: _resp(_msg(tool_calls=[_tool_call("1", "run_tests")])),
     )
 
     out = mini_agent.run_tool_loop(
@@ -120,9 +122,7 @@ def test_run_tests_allowed_when_policy_on(monkeypatch, _fake_client):
     policy.set_policy({"allow_reviewer_tests": True})
     executed = []
     monkeypatch.setattr(mini_agent, "execute_tool", lambda n, a: executed.append(n) or "全部通过")
-    monkeypatch.setattr(
-        mini_agent, "call_llm_with_retry",
-        lambda *a, **k: _resp(_msg(tool_calls=[_tool_call("1", "run_tests")])),
+    patch_mini(monkeypatch, lambda *a, **k: _resp(_msg(tool_calls=[_tool_call("1", "run_tests")])),
     )
 
     mini_agent.run_tool_loop(
@@ -137,9 +137,7 @@ def test_run_tests_denied_when_policy_off(monkeypatch, _fake_client):
     policy.set_policy({"allow_reviewer_tests": False})
     executed = []
     monkeypatch.setattr(mini_agent, "execute_tool", lambda n, a: executed.append(n) or "ok")
-    monkeypatch.setattr(
-        mini_agent, "call_llm_with_retry",
-        lambda *a, **k: _resp(_msg(tool_calls=[_tool_call("1", "run_tests")])),
+    patch_mini(monkeypatch, lambda *a, **k: _resp(_msg(tool_calls=[_tool_call("1", "run_tests")])),
     )
 
     out = mini_agent.run_tool_loop(
@@ -155,9 +153,7 @@ def test_mutating_tool_denied_even_at_level3(monkeypatch, _fake_client):
     monkeypatch.setattr(runtime, "get_permission_level", lambda sid=None: 3)
     executed = []
     monkeypatch.setattr(mini_agent, "execute_tool", lambda n, a: executed.append(n) or "ok")
-    monkeypatch.setattr(
-        mini_agent, "call_llm_with_retry",
-        lambda *a, **k: _resp(_msg(tool_calls=[_tool_call("1", "create_file", '{"path":"x","content":"y"}')])),
+    patch_mini(monkeypatch, lambda *a, **k: _resp(_msg(tool_calls=[_tool_call("1", "create_file", '{"path":"x","content":"y"}')])),
     )
 
     out = mini_agent.run_tool_loop(
@@ -172,7 +168,7 @@ def test_llm_error_is_returned_not_raised(monkeypatch, _fake_client):
     def boom(*a, **k):
         raise RuntimeError("429")
 
-    monkeypatch.setattr(mini_agent, "call_llm_with_retry", boom)
+    patch_mini(monkeypatch, boom)
     out = mini_agent.run_tool_loop(
         system_prompt="s", user_content="u", allowed_tools=["read_file"]
     )
@@ -186,7 +182,7 @@ def test_malformed_args_do_not_crash(monkeypatch, _fake_client):
         _resp(_msg(tool_calls=[_tool_call("1", "read_file", "不是 JSON")])),
         _resp(_msg(content="done")),
     ])
-    monkeypatch.setattr(mini_agent, "call_llm_with_retry", lambda *a, **k: next(responses))
+    patch_mini(monkeypatch, lambda *a, **k: next(responses))
     out = mini_agent.run_tool_loop(
         system_prompt="s", user_content="u", allowed_tools=["read_file"], max_steps=2
     )
@@ -200,9 +196,7 @@ def test_empty_allowed_tools(monkeypatch, _fake_client):
 
 def test_max_steps_is_respected(monkeypatch, _fake_client):
     monkeypatch.setattr(mini_agent, "execute_tool", lambda n, a: "ok")
-    monkeypatch.setattr(
-        mini_agent, "call_llm_with_retry",
-        lambda *a, **k: _resp(_msg(tool_calls=[_tool_call("1", "read_file")])),
+    patch_mini(monkeypatch, lambda *a, **k: _resp(_msg(tool_calls=[_tool_call("1", "read_file")])),
     )
     out = mini_agent.run_tool_loop(
         system_prompt="s", user_content="u", allowed_tools=["read_file"], max_steps=3

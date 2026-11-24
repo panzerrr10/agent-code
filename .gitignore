@@ -39,9 +39,11 @@ resume_build/
 简历-项目经历-agent-code.md
 
 # ===== 个人求职材料（不进项目仓库）=====
-# 简历、面试准备、投递记录属于个人材料，不该混进项目历史
-docs/简历-*.md
-docs/面试-*.md
-docs/面试准备-*.md
-docs/备忘录.txt
-docs/resume_build/
+# 简历、面试准备、投递记录属于个人材料，统一放在 docs/求职/，整个目录不进 git
+docs/求职/
+
+# ===== 工具本地数据（WorkBuddy 会话记忆，含本机路径与操作记录）=====
+.workbuddy/
+
+# ===== JVM 崩溃日志（Navicat 等 Java 程序留下的）=====
+hs_err_pid*.log

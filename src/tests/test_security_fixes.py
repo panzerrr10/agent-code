@@ -18,12 +18,12 @@ import types
 
 import pytest
 
-import mini_agent
 import reviewer
 import runtime
 import tools
 from config_providers import get_extra_body, get_provider_id_by_base_url
 from paths import is_allowed_path, is_path_permitted
+from tests.fakes import patch_mini
 
 HOME = os.path.expanduser("~")
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -213,15 +213,14 @@ def test_reviewer_exception_is_not_passed(monkeypatch):
         raise RuntimeError("network down")
 
     # Reviewer 现在走 mini_agent 的受限工具循环，LLM 调用点在那里
-    monkeypatch.setattr(mini_agent, "call_llm_with_retry", boom)
+    patch_mini(monkeypatch, boom)
     result = reviewer.review("task", "result", api_key="test-key")
     assert result["passed"] is None
     assert "审查未完成" in result["reason"]
 
 
 def test_reviewer_invalid_payload_is_not_passed(monkeypatch):
-    monkeypatch.setattr(
-        mini_agent, "call_llm_with_retry", lambda *a, **k: _fake_resp("这不是 JSON")
+    patch_mini(monkeypatch, lambda *a, **k: _fake_resp("这不是 JSON")
     )
     result = reviewer.review("task", "result", api_key="test-key")
     assert result["passed"] is None
@@ -229,10 +228,7 @@ def test_reviewer_invalid_payload_is_not_passed(monkeypatch):
 
 def test_reviewer_preserves_failed_verdict(monkeypatch):
     payload = {"passed": False, "reason": "没改对", "suggestions": ["重做"]}
-    monkeypatch.setattr(
-        mini_agent,
-        "call_llm_with_retry",
-        lambda *a, **k: _fake_resp(json.dumps(payload)),
+    patch_mini(monkeypatch, lambda *a, **k: _fake_resp(json.dumps(payload)),
     )
     result = reviewer.review(
         "task", "result", evidence="- 调用 edit_file(...)", api_key="test-key"

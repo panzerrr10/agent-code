@@ -1,3 +1,4 @@
+
 """Flask 路由 + SSE 流式协议的集成测试。
 
 特点：**不访问网络、不依赖 .env**。LLM 调用与 provider 配置都在用例内打桩，
@@ -15,6 +16,7 @@ import pytest
 import app as app_module
 import auth
 import runtime
+from tests.fakes import patch_agent
 
 HOME = os.path.expanduser("~")
 PROVIDER_CFG = {
@@ -37,7 +39,6 @@ def _stub_provider(monkeypatch):
 
     monkeypatch.setattr(app_module, "get_provider", lambda pid=None: dict(PROVIDER_CFG))
     monkeypatch.setattr(agent, "get_provider", lambda pid=None: dict(PROVIDER_CFG))
-    monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
 
 
 class _FakeDelta:
@@ -60,7 +61,6 @@ class _FakeChunk:
 
 def _stub_llm(monkeypatch, texts):
     """按顺序吐出固定文本，模拟 Executor 的每一次 LLM 调用。"""
-    import agent
 
     queue = list(texts)
 
@@ -72,7 +72,7 @@ def _stub_llm(monkeypatch, texts):
 
         return gen()
 
-    monkeypatch.setattr(agent, "call_llm_with_retry", fake)
+    patch_agent(monkeypatch, fake)
 
 
 def _sse(body: str):
@@ -218,7 +218,6 @@ def test_run_sse_emits_cancelled_when_interrupted(client, monkeypatch):
     _stub_provider(monkeypatch)
     holder = {}
 
-    import agent
 
     def fake(*args, **kwargs):
         def gen():
@@ -228,7 +227,7 @@ def test_run_sse_emits_cancelled_when_interrupted(client, monkeypatch):
 
         return gen()
 
-    monkeypatch.setattr(agent, "call_llm_with_retry", fake)
+    patch_agent(monkeypatch, fake)
 
     sid = _new_session(client)
     holder["sid"] = sid

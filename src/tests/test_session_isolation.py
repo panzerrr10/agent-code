@@ -11,7 +11,6 @@ import pytest
 
 import runtime
 import tools
-from utils import get_llm_client
 
 
 @pytest.fixture(autouse=True)
@@ -221,15 +220,5 @@ def test_concurrent_threads_do_not_share_state():
     assert b["root"] == "/tmp/sessB"
 
 
-# ============ LLM 客户端复用 ============
-
-
-def test_llm_client_is_reused_per_key_and_base_url():
-    c1 = get_llm_client("sk-test-1", "https://api.deepseek.com/v1")
-    c2 = get_llm_client("sk-test-1", "https://api.deepseek.com/v1")
-    c3 = get_llm_client("sk-test-2", "https://api.deepseek.com/v1")
-    c4 = get_llm_client("sk-test-1", "https://api.openai.com/v1")
-
-    assert c1 is c2, "相同 key/url 应复用同一客户端实例"
-    assert c1 is not c3, "不同 key 应使用不同客户端"
-    assert c1 is not c4, "不同 base_url 应使用不同客户端"
+# 客户端复用测试已随 openai SDK 层一起移除：
+# 现在模型调用走 LangChain 的 ChatOpenAI，连接池由 SDK 内部管理。

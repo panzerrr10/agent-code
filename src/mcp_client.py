@@ -96,12 +96,6 @@ def registry_snapshot() -> list:
     return [dict(entry, full_name=full) for full, entry in _state["registry"].items()]
 
 
-def resolve_tool(full_name: str):
-    """兼容旧调用：返回 (server, 原名)。"""
-    e = _state["registry"].get(full_name)
-    return (e["server"], e["name"]) if e else None
-
-
 # ---------------------------------------------------------------- 事件循环
 
 

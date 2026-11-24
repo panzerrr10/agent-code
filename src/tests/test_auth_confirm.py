@@ -18,6 +18,7 @@ import agent
 import auth
 import runtime
 import trash
+from tests.fakes import patch_agent
 
 HOME = os.path.expanduser("~")
 
@@ -44,7 +45,6 @@ def _sse(body: str):
 def project(monkeypatch):
     d = tempfile.mkdtemp(prefix=".agentcode-auth-", dir=HOME)
     monkeypatch.setattr(trash, "TRASH_DIR", os.path.join(d, ".trash"))
-    monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
     runtime.reset_all()
     runtime.set_session_id(None)
     yield d
@@ -172,10 +172,7 @@ def _start_pending_write(client, project, monkeypatch, target):
     with open(target, "w", encoding="utf-8") as f:
         f.write("OLD")
 
-    monkeypatch.setattr(
-        agent,
-        "call_llm_with_retry",
-        _llm(
+    patch_agent(monkeypatch, _llm(
             [
                 _Chunk(
                     _Delta(
@@ -249,8 +246,7 @@ def test_resume_with_valid_token_executes_and_cannot_be_replayed(
     assert token, "确认事件没有携带一次性令牌，前端将无法完成确认"
 
     # 带正确令牌续跑 → 执行写入，然后模型给出最终答复
-    monkeypatch.setattr(
-        agent, "call_llm_with_retry", _llm([_Chunk(_Delta(content="已经改好了"))])
+    patch_agent(monkeypatch, _llm([_Chunk(_Delta(content="已经改好了"))])
     )
     resp = client.post(
         "/run",
@@ -283,16 +279,12 @@ def test_resume_with_valid_token_executes_and_cannot_be_replayed(
 
 def test_agent_confirm_event_carries_fresh_token_each_time(project, monkeypatch):
     """两次不同的确认应得到不同的令牌（不是固定值）。"""
-    monkeypatch.setattr(agent, "get_llm_client", lambda *a, **k: object())
     tokens = []
     for name, target in (("a.txt", "A"), ("b.txt", "B")):
         path = os.path.join(project, name)
         with open(path, "w", encoding="utf-8") as f:
             f.write("old")
-        monkeypatch.setattr(
-            agent,
-            "call_llm_with_retry",
-            _llm(
+        patch_agent(monkeypatch, _llm(
                 [
                     _Chunk(
                         _Delta(

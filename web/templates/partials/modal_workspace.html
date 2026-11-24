@@ -1,0 +1,36 @@
+<!-- 工作区新建 / 编辑弹窗 -->
+<div class="modal-overlay" id="wsModal" style="display: none;"
+    onclick="if(event.target===this) closeWsModal()">
+    <div class="modal-box">
+        <div class="modal-head">
+            <span id="wsModalTitle">新建工作区</span>
+            <button class="icon-btn" onclick="closeWsModal()" title="关闭">✕</button>
+        </div>
+        <div class="modal-body">
+            <label class="fld">
+                <span class="fld-label">工作区名称</span>
+                <input type="text" id="wsNameInput" placeholder="例如 agent-code" autocomplete="off">
+            </label>
+            <label class="fld">
+                <span class="fld-label">工作区位置</span>
+                <div class="fld-row">
+                    <input type="text" id="wsPathInput" placeholder="/home/pz/PycharmProjects"
+                        autocomplete="off">
+                    <button class="trash-btn" onclick="pickWorkspaceFolder()">📂 选择文件夹</button>
+                </div>
+            </label>
+            <p class="fld-hint">
+                不填位置则使用默认工作位置：
+                <code id="wsDefaultPath">/home/pz/PycharmProjects</code><br>
+                该工作区下的会话，都会以这个目录作为工作目录。
+            </p>
+            <p class="fld-error" id="wsModalError" style="display: none;"></p>
+        </div>
+        <div class="modal-foot">
+            <button class="trash-btn" onclick="closeWsModal()">取消</button>
+            <button class="trash-btn restore" id="wsSubmitBtn" onclick="submitWorkspace()">创建</button>
+        </div>
+    </div>
+</div>
+
+<!-- 回收站面板 -->

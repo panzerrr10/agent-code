@@ -20,9 +20,8 @@
 
 from __future__ import annotations
 
-import json
-
 import mini_agent
+from utils import extract_json as _extract_json
 
 PLANNER_PROMPT = """你是一个任务规划专家。你会拿到一个代码相关的任务，需要拆解成可执行的步骤。
 
@@ -52,34 +51,6 @@ PLANNER_PROMPT = """你是一个任务规划专家。你会拿到一个代码相
   ]
 }
 """
-
-
-def _extract_json(content: str) -> dict | None:
-    """从模型输出里抠出 JSON（容忍 ```json 包裹和前后废话）。"""
-    if not content:
-        return None
-
-    text = content.strip()
-    if text.startswith("```"):
-        parts = text.split("```")
-        if len(parts) >= 2:
-            text = parts[1]
-            if text.startswith("json"):
-                text = text[4:]
-            text = text.strip()
-    try:
-        return json.loads(text)
-    except Exception:                                        # noqa: BLE001
-        pass
-
-    # 兜底：截取第一个 { 到最后一个 }
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end > start:
-        try:
-            return json.loads(text[start:end + 1])
-        except Exception:                                    # noqa: BLE001
-            return None
-    return None
 
 
 def create_plan(
