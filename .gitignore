@@ -54,3 +54,7 @@ docs/项目说明/演示脚本.md
 docs/项目说明/演示脚本.html
 docs/项目说明/项目介绍.html
 docs/项目说明/agent-code介绍.html
+
+# ===== 说明文档与内部分析（不入公开仓库，仅本地保留）=====
+/README.md
+/docs/
